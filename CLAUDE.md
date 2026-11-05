@@ -70,6 +70,7 @@ project/
 - **Backend:** Python 3.12, FastAPI. Semantic engine on `sqlglot` + Apache Arrow for all in-process data. Pipelines runner: `dlt` for extraction, dbt-compatible SQL execution, plain Python step executor. Scheduler: APScheduler initially; design for replacement.
 - **Query backends (in order):** DuckDB (zero-setup dev/demo and small prod; reads CSV/Parquet/Excel; extensions for Postgres/S3) → PostgreSQL (also the default write-back store) → SAP HANA / Datasphere (via `hdbcli`, Datasphere Open SQL schema) → Snowflake, Databricks SQL, BigQuery.
 - **Frontend:** TypeScript, React, Vite. Rendering engine consumes the JSON form of artifacts. Widget library implemented as React components with a typed props contract and a property schema that drives the builder's property panel. Charts via a Vega-Lite-compatible renderer or ECharts behind the grammar.
+  - **Deliberate deviation for Phase 0 ([ADR-007](docs/adr/007-phase-0-renderer.md)).** The Phase 0 renderer is server-side HTML built in Python (`packages/cli/src/obi_cli/render.py`, used by `obi render` and `obi serve`), with Vega-Lite charts. React work starts with the Phase 1 runtime and replaces only the presentation layer. Do not "fix" this by porting the Phase 0 renderer to React, or by adding a JS build to `packages/web`, before Phase 1 starts. Changing this needs a new ADR that supersedes ADR-007.
 - **Git:** `pygit2`/`dulwich` or shelling out to `git`; projects are cloned per deployment; branches = environments (`dev` → `staging` → `main`). Builder commits to the working branch; "Publish" = merge/deploy.
 - **Monorepo:** `packages/formats` (JSON Schemas, canonical serializer, validator — shared, must be usable standalone as a CLI), `packages/engine` (semantic/query), `packages/runtime` (API, scheduler, auth), `packages/web` (builder + renderer), `packages/cli` (download/upload/validate/deploy; later an MCP server).
 
@@ -98,6 +99,7 @@ Model format + dashboard format + JSON Schemas + canonical serializer + validato
 - Never add an LLM call to the product code. If a feature "needs AI", the answer is a better format or a CLI/MCP surface for an external agent.
 - When unsure whether something belongs in Git or in the runtime database, apply the rule: *rules, schemas and mappings → Git; identities, secrets, data, logs → database.*
 - Measure the format: track line count of the example dashboards. Growth without new capability is a regression.
+- Every new format property ships with a round-trip test (`packages/formats/tests/test_roundtrip.py`) that puts a comment next to it: a full-line comment above it and a trailing comment on its line. The test asserts that `canonicalize` keeps both and that a second pass is a no-op. Comment attachment is our own code (ADR-006), not the YAML library's, so each new shape needs its own proof.
 - Document decisions in `docs/adr/` as short ADRs (context, decision, consequences).
 
 ## Explicit non-goals (for now)

@@ -3,7 +3,11 @@ name = "obi-cli"
 version = "0.0.0"
 description = "obi command line: validate, render (later: download/upload/deploy)"
 requires-python = ">=3.12,<3.13"
-dependencies = ["obi-formats", "obi-engine"]
+dependencies = [
+    "obi-formats",
+    "obi-engine",
+    "markdown-it-py>=3",
+]
 
 [project.scripts]
 obi = "obi_cli.__main__:main"

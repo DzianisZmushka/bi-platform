@@ -257,3 +257,14 @@ def test_flow_style_switches_to_block_when_the_line_is_too_wide():
     out = canon(src)
     assert "        values:\n          - measure_number_0\n" in out
     assert max(len(line) for line in out.splitlines()) <= 100
+
+
+def test_y_key_stays_plain():
+    """ADR-002 §1a: `y` is a deliberate exception to the YAML 1.1 boolean-key ban.
+    Do not change this test to expect `"y":`; read the ADR first."""
+    src = "dashboard: demo\nmodel: sales\npages:\n  - page: p\n    items:\n" \
+          "      - chart: c\n        mark: bar\n        x: region\n        y: net_revenue\n"
+    out = canon(src)
+    assert "        y: net_revenue\n" in out and '"y"' not in out
+    # Values are not exempt: a string value `y` must still be quoted.
+    assert canon(src.replace("x: region", "title: y")).count('title: "y"') == 1

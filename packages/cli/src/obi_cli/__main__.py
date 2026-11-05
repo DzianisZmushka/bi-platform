@@ -1,11 +1,95 @@
-"""Entry point for the `obi` command. Commands arrive in Phase 0 step 5."""
+"""The `obi` command.
 
+    obi validate [PROJECT]
+    obi render   [PROJECT] [--dashboard ID] [--out DIR] [--filter ID=V1,V2] [--as-of DATE]
+    obi serve    [PROJECT] [--port 8765] [--as-of DATE]
+
+Rendering always validates first; an invalid project is never rendered.
+"""
+
+from __future__ import annotations
+
+import argparse
 import sys
+from datetime import date
+from pathlib import Path
+
+from obi_formats.validate import validate_project
 
 
-def main() -> int:
-    print("obi: no commands yet (validate/render land in Phase 0, step 5)", file=sys.stderr)
-    return 1
+def _validate(root: Path) -> int:
+    issues = validate_project(root)
+    for issue in issues:
+        print(f"{root.as_posix()}/{issue}", file=sys.stderr)
+    return sum(i.severity == "error" for i in issues)
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(prog="obi", description="Open BI Platform command line (Phase 0).")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    v = sub.add_parser("validate", help="validate every artifact of a project")
+    v.add_argument("project", nargs="?", default=".")
+
+    r = sub.add_parser("render", help="render dashboards to static HTML")
+    r.add_argument("project", nargs="?", default=".")
+    r.add_argument("--dashboard", "-d", action="append", help="dashboard id (default: all)")
+    r.add_argument("--out", "-o", help="output directory (default: PROJECT/.obi/render)")
+    r.add_argument("--filter", "-f", action="append", default=[], metavar="ID=V1,V2",
+                   help="set a filter, e.g. region=EMEA,APAC or period=2026-01-01..2026-03-31; "
+                        "an empty value clears the default")
+    r.add_argument("--as-of", type=date.fromisoformat, help="date that presets such as this_year use")
+
+    s = sub.add_parser("serve", help="serve dashboards locally; filters and navigation work")
+    s.add_argument("project", nargs="?", default=".")
+    s.add_argument("--port", type=int, default=8765)
+    s.add_argument("--as-of", type=date.fromisoformat)
+
+    args = ap.parse_args(argv)
+    root = Path(args.project)
+    if not (root / "project.yaml").is_file():
+        print(f"obi: {root.as_posix()} is not a project (no project.yaml)", file=sys.stderr)
+        return 2
+
+    if args.cmd == "validate":
+        errors = _validate(root)
+        print(f"{errors} error(s)" if errors else "valid", file=sys.stderr)
+        return 1 if errors else 0
+
+    if args.cmd == "serve":
+        from .server import serve
+        serve(root, args.port, args.as_of)
+        return 0
+
+    errors = _validate(root)
+    if errors:
+        print(f"{errors} error(s); fix them before rendering", file=sys.stderr)
+        return 1
+
+    from .render import dashboard_ids, filter_ids, render_dashboard
+    inputs: dict[str, list[str]] = {}
+    for item in args.filter:
+        fid, _, values = item.partition("=")
+        inputs[fid.strip()] = [x.strip() for x in values.split(",") if x.strip()] if values else []
+    out = Path(args.out) if args.out else root / ".obi" / "render"
+    out.mkdir(parents=True, exist_ok=True)
+    ids = args.dashboard or [d for d, _ in dashboard_ids(root)]
+    known = {d for d, _ in dashboard_ids(root)}
+    failed = 0
+    for did in ids:
+        if did not in known:
+            print(f"obi: no dashboard `{did}`; available: {', '.join(sorted(known))}", file=sys.stderr)
+            return 2
+        unknown = set(inputs) - set(filter_ids(root, did))
+        result = render_dashboard(root, did, {k: v for k, v in inputs.items() if k not in unknown} or None,
+                                  args.as_of, mode="static")
+        path = out / f"{did}.html"
+        path.write_text(result.html, encoding="utf-8", newline="\n")
+        print(path.as_posix())
+        for e in result.errors:
+            print(f"  problem: {e}", file=sys.stderr)
+        failed += bool(result.errors)
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

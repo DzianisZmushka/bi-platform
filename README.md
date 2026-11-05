@@ -2,7 +2,7 @@
 
 A data platform where every artifact — semantic models, dashboards, forms, reports, pipelines, roles — is a readable text file in Git. See [CLAUDE.md](CLAUDE.md) for the product principles and roadmap, and [docs/adr/](docs/adr/) for the decisions made so far.
 
-**Status:** Phase 0. Formats, JSON Schemas, the canonical serializer and the validator are done (`packages/formats`). The `obi` CLI with `validate` / `render` on DuckDB is next.
+**Status:** Phase 0 is complete: formats, validator, thin engine on DuckDB, and `obi validate` / `render` / `serve`. Phase 0 renderer scope and limits: [ADR-007](docs/adr/007-phase-0-renderer.md).
 
 ## Tooling: uv only
 
@@ -10,11 +10,13 @@ Python 3.12 and every dependency are managed with [uv](https://docs.astral.sh/uv
 
 ```bash
 uv sync                      # create .venv with Python 3.12 and install all workspace packages
-uv run obi                   # run the CLI
+uv run obi validate examples/sales-demo           # validate a project
+uv run obi render examples/sales-demo             # write .obi/render/<dashboard>.html
+uv run obi render examples/sales-demo -f channel=Online -f period=last_year
+uv run obi serve examples/sales-demo              # http://127.0.0.1:8765, live filters
 uv run pytest                # run tests
 uv add --package obi-engine sqlglot   # add a dependency to one package
 uv run scripts/format_stats.py       # line counts of example dashboards
-uv run obi-formats validate examples/sales-demo   # validate a project
 uv run obi-formats fmt --check examples           # check canonical form (drop --check to rewrite)
 ```
 
@@ -50,3 +52,14 @@ Regenerate the sample data (deterministic, standard library only):
 ```bash
 uv run python examples/sales-demo/data/generate.py
 ```
+
+## The Phase 0 loop: hand a dashboard to any LLM
+
+1. Start the live view: `uv run obi serve examples/sales-demo` and open http://127.0.0.1:8765.
+2. Give the LLM the dashboard file plus the model it binds to, for example
+   `examples/sales-demo/dashboards/commercial-review/dashboard.yaml` and `examples/sales-demo/model/sales.model.yaml`.
+   For best results also include [examples/sales-demo/README.md](examples/sales-demo/README.md) (the vocabulary)
+   and [docs/formats/expressions.md](docs/formats/expressions.md). Ask for the whole file back.
+3. Paste the answer over the file, refresh the browser. If it is invalid, the page lists each error with the
+   element and the fix; paste those back to the LLM.
+4. Optionally run `uv run obi-formats fmt examples` to put the file in canonical form, then `git diff`.

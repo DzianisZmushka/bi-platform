@@ -10,3 +10,4 @@ Short records: context, decision, consequences. A record is never edited after a
 | [004](004-uv-only-python-tooling.md) | uv as the only Python tool | Accepted |
 | [005](005-references-grain-and-filter-scope.md) | References, grain and filter scope | Accepted |
 | [006](006-serializer-and-comment-preservation.md) | Serializer and comment preservation | Accepted |
+| [007](007-phase-0-renderer.md) | Phase 0 renderer: server-side HTML from the CLI | Accepted |

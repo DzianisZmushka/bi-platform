@@ -8,3 +8,6 @@ dist/
 *.duckdb
 *.duckdb.wal
 .env
+.obi/
+# local preview config for the Claude desktop app
+.claude/launch.json

@@ -3,7 +3,12 @@ name = "obi-engine"
 version = "0.0.0"
 description = "Thin semantic query engine (sqlglot + DuckDB, Arrow end-to-end)"
 requires-python = ">=3.12,<3.13"
-dependencies = ["obi-formats"]
+dependencies = [
+    "duckdb>=1.1",
+    "obi-formats",
+    "pyarrow>=17",
+    "sqlglot>=25",
+]
 
 [build-system]
 requires = ["hatchling"]

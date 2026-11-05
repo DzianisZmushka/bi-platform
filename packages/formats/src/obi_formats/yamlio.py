@@ -340,9 +340,9 @@ def needs_quotes(s: str, flow: bool = False) -> bool:
 
 
 def format_key(k: str) -> str:
-    # `x`/`y` are chart channels. Only the YAML 1.1 spec (and e.g. go-yaml v2) reads a
-    # bare `y`/`n` as a boolean; PyYAML, ruamel, js-yaml and go-yaml v3 do not (ADR-006).
-    if k in ("y", "n"):
+    # Deliberate exception (ADR-002 §1a): the chart key `y` stays plain. Only full YAML 1.1
+    # parsers (e.g. go-yaml v2) read it as a boolean, and those are not supported.
+    if k == "y":
         return k
     return format_scalar(k)
 

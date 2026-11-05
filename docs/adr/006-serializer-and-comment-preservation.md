@@ -28,7 +28,7 @@ So ruamel cannot meet the requirement. Its own "comments before elements only" m
 
 **Blank lines.** These are canonical, not preserved. A blank line goes before every top-level key whose value is a block collection, and between the entries of collections marked `x-blank-lines` in the schema (model `entities`, dashboard `pages`). Other blank lines are dropped.
 
-**`x` and `y` keys.** The YAML 1.1 spec (and parsers such as go-yaml v2) read a bare `y` or `n` as a boolean. PyYAML, ruamel, js-yaml and go-yaml v3 do not. Chart channels keep the Vega-Lite names `x`/`y`, and the writer leaves the keys `y` and `n` unquoted. Every other YAML 1.1 boolean or null word (`on`, `yes`, `off`, ...) is quoted wherever it appears, and none may be used as a key name (ADR-002).
+**`x` and `y` keys.** The YAML 1.1 spec (and parsers such as go-yaml v2) read a bare `y` or `n` as a boolean. PyYAML, ruamel, js-yaml and go-yaml v3 do not. Chart channels keep the Vega-Lite names `x`/`y`, and the writer leaves the key `y` unquoted (ADR-002 §1a defines the exception and the supported parsers). Every other YAML 1.1 boolean or null word (`on`, `yes`, `off`, ...) is quoted wherever it appears, and none may be used as a key name (ADR-002).
 
 ## Consequences
 

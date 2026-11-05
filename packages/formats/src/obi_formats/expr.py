@@ -208,10 +208,17 @@ def is_expression(s: Any) -> bool:
 
 
 class FilterSelection(list):
-    """`filters.<id>`: always a list of selected values; empty means not set."""
+    """`filters.<id>`: always a list of selected values; empty means not set.
+    `display` overrides `.label`, e.g. "This year" for a date range."""
+
+    def __init__(self, values=(), display: str | None = None):
+        super().__init__(values)
+        self.display = display
 
     @property
     def label(self) -> str:
+        if self.display is not None:
+            return self.display
         return ", ".join(str(v) for v in self)
 
     @property

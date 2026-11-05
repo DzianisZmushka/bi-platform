@@ -429,8 +429,12 @@ class _DashboardCheck:
                 if prop == "sparkline" and r.field.dtype != "date":
                     self.report(path + ("sparkline",), label,
                                 f"`sparkline` needs a date dimension; `{r.text}` is a {r.field.dtype} dimension")
-        if kind == "chart" and self.idx and refs \
-                and not any(r.kind == "measure" for p, r in refs if p in ("x", "y")):
+        xy_written = [s for p in ("x", "y") for s in (w.get(p) if isinstance(w.get(p), list) else [w.get(p)])
+                      if isinstance(s, str)]
+        xy_resolved = [r for p, r in refs if p in ("x", "y")]
+        # Only when every x/y name resolved; otherwise the unknown name is the real problem.
+        if kind == "chart" and self.idx and xy_written and len(xy_resolved) == len(xy_written) \
+                and not any(r.kind == "measure" for r in xy_resolved):
             self.report(path, label, "a chart needs a measure on `x` or `y`")
 
         where_refs: list[tuple[str, Ref]] = []

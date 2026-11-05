@@ -219,3 +219,15 @@ def test_dashboard_navigation_and_duplicate_ids():
         "dashboard `revenue-overview`, widget `revenue`: id `revenue` is already used by widget `revenue` "
         "on line 20; ids must be unique within a dashboard",
     ]
+
+
+def test_unknown_chart_axis_reports_only_the_name():
+    o = edit(OVERVIEW, "            y: net_revenue\n            series: channel",
+             "            y: net_rev\n            series: channel")
+    assert messages(o) == [
+        "dashboard `revenue-overview`, widget `revenue_trend`: field `net_rev` not found in model `sales`; "
+        "did you mean `net_revenue`?",
+    ]
+    o = edit(OVERVIEW, "            y: net_revenue\n            series: channel",
+             "            y: segment\n            series: channel")
+    assert messages(o) == ["dashboard `revenue-overview`, widget `revenue_trend`: a chart needs a measure on `x` or `y`"]

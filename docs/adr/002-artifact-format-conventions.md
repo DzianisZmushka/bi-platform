@@ -9,7 +9,13 @@ Every artifact has to be readable by a person, editable by an LLM as a whole fil
 
 ## Decision
 
-**1. YAML on disk, JSON internally, same data model.** The parsed YAML *is* the JSON document: no renaming or reshaping between the two. JSON Schema validates it directly. The allowed YAML is a strict subset: no anchors or aliases, no tags, one document per file, string keys only, YAML 1.2 scalars (`yes`/`no` are strings). Many tools still parse YAML 1.1, so no format may define a key or enum value that YAML 1.1 reads as a boolean or null: `on`, `off`, `yes`, `no`, `true`, `false`, `null`, `~` (the chart key `y` is the one exception, ADR-006). (PyYAML reads `on:` as `True:`. The first draft of the model's join syntax hit this.)
+**1. YAML on disk, JSON internally, same data model.** The parsed YAML *is* the JSON document: no renaming or reshaping between the two. JSON Schema validates it directly. The allowed YAML is a strict subset: no anchors or aliases, no tags, one document per file, string keys only, YAML 1.2 scalars (`yes`/`no` are strings). Many tools still parse YAML 1.1, so no format may define a key or enum value that YAML 1.1 reads as a boolean or null: `on`, `off`, `yes`, `no`, `y`, `n`, `true`, `false`, `null`, `~`. (PyYAML reads `on:` as `True:`. The first draft of the model's join syntax hit this.)
+
+**1a. Deliberate exception: the chart keys `x` and `y`.** They are exempt from the ban above and are written unquoted. They are the channel names of the Vega-Lite grammar that charts follow. Quoting them (`"y":`) in every chart would cost readability for no gain with the parsers we support.
+
+The formats therefore **require a YAML 1.2 parser, or one of PyYAML, ruamel.yaml, js-yaml or go-yaml v3**. Those read `y` as a string. Parsers that implement the YAML 1.1 boolean list in full, such as go-yaml v2 and some older Java libraries, would read a chart's `y:` key as `true` and are not supported.
+
+**Do not "fix" this by quoting or renaming the keys.** `test_y_key_stays_plain` in `packages/formats/tests` fails if the writer starts quoting them. Any new key must still avoid the YAML 1.1 words. This exception covers `x`/`y` only. ([ADR-006](006-serializer-and-comment-preservation.md) records how the writer implements it.)
 
 **2. The kind is a key, not a `type:` field.** An element whose kind matters puts the kind first as a key, and the value of that key is the element's id:
 
