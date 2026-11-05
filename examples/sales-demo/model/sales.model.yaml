@@ -33,9 +33,8 @@ entities:
     description: Monthly net revenue targets per region, set by finance.
     table: targets
     key: [month, region_id]
-    joins:
-      calendar: { column: month, grain: month }
-      regions: region_id
+    grain: [date.month, region]
+    joins: { calendar: month, regions: region_id }
     measures:
       revenue_target: { sum: revenue_target, label: Target, format: currency }
       target_attainment: { calc: net_revenue / revenue_target, label: Attainment, format: percent }

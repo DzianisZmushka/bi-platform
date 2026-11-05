@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://obi.dev/schemas/model.schema.json",
+  "title": "Semantic model",
+  "description": "model/<id>.model.yaml. Property order in each definition is the canonical key order (ADR-003).",
+  "$ref": "#/$defs/model",
+  "$defs": {
+    "model": {
+      "type": "object",
+      "x-kind": "model",
+      "properties": {
+        "model": { "$ref": "#/$defs/artifact_id" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "entities": {
+          "type": "object",
+          "minProperties": 1,
+          "x-blank-lines": true,
+          "propertyNames": { "$ref": "#/$defs/id" },
+          "additionalProperties": { "$ref": "#/$defs/entity" }
+        },
+        "hierarchies": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/id" },
+          "additionalProperties": { "$ref": "#/$defs/hierarchy" }
+        }
+      },
+      "required": ["model", "entities"],
+      "additionalProperties": false
+    },
+    "entity": {
+      "type": "object",
+      "x-element": "entity",
+      "properties": {
+        "description": { "type": "string" },
+        "table": { "type": "string", "minLength": 1 },
+        "key": {
+          "type": ["string", "array"], "minLength": 1, "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "grain": {
+          "$ref": "#/$defs/refs",
+          "description": "Dimensions this entity's measures can be sliced and filtered by. Default: every dimension reachable through joins, at full detail."
+        },
+        "joins": {
+          "type": "object",
+          "description": "Many-to-one joins: <target entity>: <foreign key column of this entity>.",
+          "propertyNames": { "$ref": "#/$defs/id" },
+          "additionalProperties": { "type": "string", "minLength": 1 }
+        },
+        "dimensions": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/id" },
+          "additionalProperties": { "$ref": "#/$defs/dimension" }
+        },
+        "measures": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/id" },
+          "additionalProperties": { "$ref": "#/$defs/measure" }
+        }
+      },
+      "required": ["table", "key"],
+      "additionalProperties": false
+    },
+    "dimension": {
+      "type": ["object", "null"],
+      "x-element": "dimension",
+      "description": "An empty value means: column with the same name, type string, label from the name.",
+      "properties": {
+        "label": { "type": "string" },
+        "description": { "type": "string" },
+        "column": { "type": "string", "minLength": 1 },
+        "type": { "enum": ["string", "number", "date", "boolean"], "default": "string" }
+      },
+      "additionalProperties": false
+    },
+    "measure": {
+      "type": "object",
+      "x-element": "measure",
+      "x-kind-keys": ["sum", "count", "count_distinct", "avg", "min", "max", "calc"],
+      "description": "Exactly one kind key: an aggregation over a SQL column expression, or `calc` over other measures.",
+      "properties": {
+        "sum": { "$ref": "#/$defs/sql" },
+        "count": { "$ref": "#/$defs/sql" },
+        "count_distinct": { "$ref": "#/$defs/sql" },
+        "avg": { "$ref": "#/$defs/sql" },
+        "min": { "$ref": "#/$defs/sql" },
+        "max": { "$ref": "#/$defs/sql" },
+        "calc": { "$ref": "#/$defs/sql" },
+        "label": { "type": "string" },
+        "description": { "type": "string" },
+        "where": { "$ref": "#/$defs/sql" },
+        "grain": { "$ref": "#/$defs/refs" },
+        "format": { "enum": ["number", "integer", "currency", "percent"], "default": "number" }
+      },
+      "additionalProperties": false
+    },
+    "hierarchy": {
+      "x-element": "hierarchy",
+      "$ref": "#/$defs/refs",
+      "minItems": 2
+    },
+    "sql": { "type": "string", "minLength": 1 },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "x-error": "is not a valid name: use lowercase letters, digits and underscores, starting with a letter"
+    },
+    "artifact_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+      "x-error": "is not a valid artifact id: use lowercase kebab-case such as `sales`"
+    },
+    "ref": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*){0,2}$",
+      "x-error": "is not a field reference: use a name such as `region`, `date.month` or `customers.segment`"
+    },
+    "refs": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/ref" } }
+  }
+}

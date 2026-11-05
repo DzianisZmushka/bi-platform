@@ -1,6 +1,6 @@
 # ADR-003: Canonical YAML serialization
 
-- Status: Accepted (rules are binding; the serializer that enforces them is Phase 0 step 4)
+- Status: Accepted. Implemented in `obi_formats.yamlio`; §7 refined by [ADR-006](006-serializer-and-comment-preservation.md).
 - Date: 2026-11-05
 
 ## Context

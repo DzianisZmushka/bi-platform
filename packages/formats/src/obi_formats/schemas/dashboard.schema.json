@@ -1,0 +1,329 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://obi.dev/schemas/dashboard.schema.json",
+  "title": "Dashboard",
+  "description": "dashboards/<id>/dashboard.yaml. Property order in each definition is the canonical key order (ADR-003). Layout nodes are dispatched by their kind key (ADR-002); `x-kind` names that key.",
+  "$ref": "#/$defs/dashboard",
+  "$defs": {
+    "dashboard": {
+      "type": "object",
+      "x-kind": "dashboard",
+      "properties": {
+        "dashboard": { "$ref": "#/$defs/artifact_id" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "model": { "$ref": "#/$defs/artifact_id" },
+        "filters": { "type": "array", "items": { "$ref": "#/$defs/filter" } },
+        "pages": { "type": "array", "minItems": 1, "x-blank-lines": true, "items": { "$ref": "#/$defs/page" } }
+      },
+      "required": ["dashboard", "model", "pages"],
+      "additionalProperties": false
+    },
+    "filter": {
+      "type": "object",
+      "x-kind": "filter",
+      "x-element": "filter",
+      "properties": {
+        "filter": { "$ref": "#/$defs/id" },
+        "title": { "type": "string" },
+        "dimension": { "$ref": "#/$defs/ref" },
+        "default": { "type": ["string", "number", "boolean", "array"], "items": { "type": ["string", "number", "boolean"] } },
+        "multiple": { "type": "boolean", "default": true },
+        "pages": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/id" } }
+      },
+      "required": ["filter", "dimension"],
+      "additionalProperties": false
+    },
+    "page": {
+      "type": "object",
+      "x-kind": "page",
+      "x-element": "page",
+      "properties": {
+        "page": { "$ref": "#/$defs/id" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "visible": { "$ref": "#/$defs/expression" },
+        "items": { "$ref": "#/$defs/nodes" }
+      },
+      "required": ["page", "items"],
+      "additionalProperties": false
+    },
+    "nodes": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/node" } },
+    "node": {
+      "type": "object",
+      "description": "A layout node. The kind key (row, grid, kpi, ...) decides which definition applies.",
+      "allOf": [
+        { "if": { "required": ["row"] }, "then": { "$ref": "#/$defs/row" } },
+        { "if": { "required": ["grid"] }, "then": { "$ref": "#/$defs/grid" } },
+        { "if": { "required": ["tabs"] }, "then": { "$ref": "#/$defs/tabs" } },
+        { "if": { "required": ["card"] }, "then": { "$ref": "#/$defs/card" } },
+        { "if": { "required": ["section"] }, "then": { "$ref": "#/$defs/section" } },
+        { "if": { "required": ["kpi"] }, "then": { "$ref": "#/$defs/kpi" } },
+        { "if": { "required": ["chart"] }, "then": { "$ref": "#/$defs/chart" } },
+        { "if": { "required": ["table"] }, "then": { "$ref": "#/$defs/table" } },
+        { "if": { "required": ["text"] }, "then": { "$ref": "#/$defs/text" } },
+        { "if": { "required": ["button"] }, "then": { "$ref": "#/$defs/button" } },
+        {
+          "if": { "not": { "anyOf": [
+            { "required": ["row"] }, { "required": ["grid"] }, { "required": ["tabs"] },
+            { "required": ["card"] }, { "required": ["section"] }, { "required": ["kpi"] },
+            { "required": ["chart"] }, { "required": ["table"] }, { "required": ["text"] },
+            { "required": ["button"] }
+          ] } },
+          "then": false
+        }
+      ]
+    },
+
+    "row": {
+      "type": "object",
+      "x-kind": "row",
+      "x-element": "container",
+      "properties": {
+        "row": { "$ref": "#/$defs/id" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "visible": { "$ref": "#/$defs/expression" },
+        "items": { "$ref": "#/$defs/nodes" }
+      },
+      "required": ["row", "items"],
+      "additionalProperties": false
+    },
+    "grid": {
+      "type": "object",
+      "x-kind": "grid",
+      "x-element": "container",
+      "properties": {
+        "grid": { "$ref": "#/$defs/id" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "columns": {
+          "type": ["integer", "array"], "minimum": 1, "minItems": 1,
+          "items": { "type": "number", "exclusiveMinimum": 0 },
+          "description": "Number of equal columns, or relative widths such as [2, 1]."
+        },
+        "visible": { "$ref": "#/$defs/expression" },
+        "items": { "$ref": "#/$defs/nodes" }
+      },
+      "required": ["grid", "columns", "items"],
+      "additionalProperties": false
+    },
+    "tabs": {
+      "type": "object",
+      "x-kind": "tabs",
+      "x-element": "container",
+      "properties": {
+        "tabs": { "$ref": "#/$defs/id" },
+        "visible": { "$ref": "#/$defs/expression" },
+        "items": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/tab" } }
+      },
+      "required": ["tabs", "items"],
+      "additionalProperties": false
+    },
+    "tab": {
+      "type": "object",
+      "x-kind": "tab",
+      "x-element": "tab",
+      "properties": {
+        "tab": { "$ref": "#/$defs/id" },
+        "title": { "type": "string" },
+        "visible": { "$ref": "#/$defs/expression" },
+        "items": { "$ref": "#/$defs/nodes" }
+      },
+      "required": ["tab", "items"],
+      "additionalProperties": false
+    },
+    "card": {
+      "type": "object",
+      "x-kind": "card",
+      "x-element": "container",
+      "properties": {
+        "card": { "$ref": "#/$defs/id" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "visible": { "$ref": "#/$defs/expression" },
+        "items": { "$ref": "#/$defs/nodes" }
+      },
+      "required": ["card", "items"],
+      "additionalProperties": false
+    },
+    "section": {
+      "type": "object",
+      "x-kind": "section",
+      "x-element": "container",
+      "properties": {
+        "section": { "$ref": "#/$defs/id" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "visible": { "$ref": "#/$defs/expression" },
+        "collapsed": { "type": "boolean", "default": false },
+        "items": { "$ref": "#/$defs/nodes" }
+      },
+      "required": ["section", "items"],
+      "additionalProperties": false
+    },
+
+    "kpi": {
+      "type": "object",
+      "x-kind": "kpi",
+      "x-element": "widget",
+      "properties": {
+        "kpi": { "$ref": "#/$defs/id" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "measure": { "$ref": "#/$defs/ref" },
+        "target": { "$ref": "#/$defs/ref" },
+        "compare": { "enum": ["previous_period", "previous_year"] },
+        "sparkline": { "$ref": "#/$defs/ref" },
+        "ignore_filters": { "$ref": "#/$defs/ignore_filters" },
+        "on_click": { "$ref": "#/$defs/on_click" },
+        "visible": { "$ref": "#/$defs/expression" },
+        "color": { "$ref": "#/$defs/expression" }
+      },
+      "required": ["kpi", "measure"],
+      "additionalProperties": false
+    },
+    "chart": {
+      "type": "object",
+      "x-kind": "chart",
+      "x-element": "widget",
+      "properties": {
+        "chart": { "$ref": "#/$defs/id" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "mark": { "enum": ["line", "bar", "area", "point", "arc"] },
+        "x": { "$ref": "#/$defs/ref" },
+        "y": { "$ref": "#/$defs/ref_or_refs" },
+        "series": { "$ref": "#/$defs/ref" },
+        "detail": { "$ref": "#/$defs/ref" },
+        "stack": { "type": "boolean", "default": false },
+        "where": { "$ref": "#/$defs/where" },
+        "ignore_filters": { "$ref": "#/$defs/ignore_filters" },
+        "sort": { "$ref": "#/$defs/sort" },
+        "limit": { "type": "integer", "minimum": 1 },
+        "on_click": { "$ref": "#/$defs/on_click" },
+        "visible": { "$ref": "#/$defs/expression" },
+        "color": { "$ref": "#/$defs/expression" }
+      },
+      "required": ["chart", "mark", "y"],
+      "additionalProperties": false
+    },
+    "table": {
+      "type": "object",
+      "x-kind": "table",
+      "x-element": "widget",
+      "properties": {
+        "table": { "$ref": "#/$defs/id" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "rows": { "$ref": "#/$defs/refs" },
+        "columns": { "$ref": "#/$defs/refs" },
+        "values": { "$ref": "#/$defs/refs" },
+        "where": { "$ref": "#/$defs/where" },
+        "ignore_filters": { "$ref": "#/$defs/ignore_filters" },
+        "sort": { "$ref": "#/$defs/sort" },
+        "limit": { "type": "integer", "minimum": 1 },
+        "totals": { "type": "boolean", "default": false },
+        "on_click": { "$ref": "#/$defs/on_click" },
+        "visible": { "$ref": "#/$defs/expression" },
+        "cells": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/ref" },
+          "additionalProperties": { "$ref": "#/$defs/cell" }
+        }
+      },
+      "required": ["table", "values"],
+      "additionalProperties": false
+    },
+    "text": {
+      "type": "object",
+      "x-kind": "text",
+      "x-element": "widget",
+      "properties": {
+        "text": { "$ref": "#/$defs/id" },
+        "title": { "type": "string" },
+        "content": { "type": "string", "description": "Markdown; may contain ${...} expressions." },
+        "visible": { "$ref": "#/$defs/expression" }
+      },
+      "required": ["text", "content"],
+      "additionalProperties": false
+    },
+    "button": {
+      "type": "object",
+      "x-kind": "button",
+      "x-element": "widget",
+      "properties": {
+        "button": { "$ref": "#/$defs/id" },
+        "label": { "type": "string" },
+        "on_click": { "$ref": "#/$defs/on_click" },
+        "visible": { "$ref": "#/$defs/expression" }
+      },
+      "required": ["button", "label", "on_click"],
+      "additionalProperties": false
+    },
+
+    "cell": {
+      "type": "object",
+      "properties": {
+        "color": { "$ref": "#/$defs/expression" },
+        "bar": { "type": "boolean", "default": false }
+      },
+      "additionalProperties": false
+    },
+    "on_click": {
+      "type": "object",
+      "properties": {
+        "navigate": {
+          "type": "string",
+          "pattern": "^([a-z][a-z0-9]*(-[a-z0-9]+)*/)?[a-z][a-z0-9_]*$",
+          "x-error": "must be a page id (`regions`) or `dashboard-id/page_id`"
+        },
+        "set": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/id" },
+          "additionalProperties": { "type": ["string", "number", "boolean"] }
+        }
+      },
+      "required": ["navigate"],
+      "additionalProperties": false
+    },
+    "where": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/ref" },
+      "additionalProperties": {
+        "type": ["string", "number", "boolean", "array"],
+        "items": { "type": ["string", "number", "boolean"] }
+      }
+    },
+    "ignore_filters": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/id" } },
+    "expression": { "type": "string", "description": "A literal, or ${...} (docs/formats/expressions.md)." },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "x-error": "is not a valid id: use lowercase letters, digits and underscores, starting with a letter"
+    },
+    "artifact_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+      "x-error": "is not a valid artifact id: use lowercase kebab-case such as `revenue-overview`"
+    },
+    "ref": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*){0,2}$",
+      "x-error": "is not a field reference: use a model name such as `net_revenue`, `date.month` or `customers.segment`"
+    },
+    "refs": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/ref" } },
+    "ref_or_refs": {
+      "type": ["string", "array"],
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*){0,2}$",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/ref" },
+      "x-error": "is not a field reference: use a model name such as `net_revenue`, `date.month` or `customers.segment`"
+    },
+    "sort": {
+      "type": "string",
+      "pattern": "^-?[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*){0,2}$",
+      "x-error": "is not a sort field: use a field of the widget, prefixed with `-` for descending (`-net_revenue`)"
+    }
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://obi.dev/schemas/project.schema.json",
+  "title": "Project",
+  "description": "project.yaml at the root of a project. Never holds secrets: connections name a secret, the runtime supplies it.",
+  "$ref": "#/$defs/project",
+  "$defs": {
+    "project": {
+      "type": "object",
+      "x-kind": "project",
+      "properties": {
+        "project": { "$ref": "#/$defs/artifact_id" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "default_connection": { "$ref": "#/$defs/id" },
+        "currency": { "type": "string", "pattern": "^[A-Z]{3}$", "x-error": "must be an ISO 4217 code such as `USD`" },
+        "connections": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": { "$ref": "#/$defs/id" },
+          "additionalProperties": { "$ref": "#/$defs/connection" }
+        }
+      },
+      "required": ["project", "default_connection", "connections"],
+      "additionalProperties": false
+    },
+    "connection": {
+      "type": "object",
+      "x-element": "connection",
+      "x-kind-keys": ["duckdb"],
+      "properties": {
+        "duckdb": {
+          "type": ["object", "null"],
+          "description": "Empty: in-memory database.",
+          "properties": { "database": { "type": "string" } },
+          "additionalProperties": false
+        },
+        "tables": {
+          "type": "object",
+          "description": "File-backed tables: <table name>: <path relative to the project root>.",
+          "propertyNames": { "$ref": "#/$defs/id" },
+          "additionalProperties": { "type": "string", "minLength": 1 }
+        }
+      },
+      "additionalProperties": false
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "x-error": "is not a valid name: use lowercase letters, digits and underscores, starting with a letter"
+    },
+    "artifact_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+      "x-error": "is not a valid project id: use lowercase kebab-case such as `sales-demo`"
+    }
+  }
+}

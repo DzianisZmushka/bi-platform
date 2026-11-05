@@ -1,6 +1,6 @@
 # ADR-002: Artifact format conventions
 
-- Status: Accepted
+- Status: Accepted. §4 and §6 amended by [ADR-005](005-references-grain-and-filter-scope.md); the y/n key exception is in [ADR-006](006-serializer-and-comment-preservation.md).
 - Date: 2026-11-05
 
 ## Context
@@ -9,7 +9,7 @@ Every artifact has to be readable by a person, editable by an LLM as a whole fil
 
 ## Decision
 
-**1. YAML on disk, JSON internally, same data model.** The parsed YAML *is* the JSON document: no renaming or reshaping between the two. JSON Schema validates it directly. The allowed YAML is a strict subset: no anchors or aliases, no tags, one document per file, string keys only, YAML 1.2 scalars (`yes`/`no` are strings). Many tools still parse YAML 1.1, so no format may define a key or enum value that YAML 1.1 reads as a boolean or null: `on`, `off`, `yes`, `no`, `y`, `n`, `true`, `false`, `null`, `~`. (PyYAML reads `on:` as `True:`. The first draft of the model's join syntax hit this.)
+**1. YAML on disk, JSON internally, same data model.** The parsed YAML *is* the JSON document: no renaming or reshaping between the two. JSON Schema validates it directly. The allowed YAML is a strict subset: no anchors or aliases, no tags, one document per file, string keys only, YAML 1.2 scalars (`yes`/`no` are strings). Many tools still parse YAML 1.1, so no format may define a key or enum value that YAML 1.1 reads as a boolean or null: `on`, `off`, `yes`, `no`, `true`, `false`, `null`, `~` (the chart key `y` is the one exception, ADR-006). (PyYAML reads `on:` as `True:`. The first draft of the model's join syntax hit this.)
 
 **2. The kind is a key, not a `type:` field.** An element whose kind matters puts the kind first as a key, and the value of that key is the element's id:
 

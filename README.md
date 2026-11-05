@@ -2,7 +2,7 @@
 
 A data platform where every artifact — semantic models, dashboards, forms, reports, pipelines, roles — is a readable text file in Git. See [CLAUDE.md](CLAUDE.md) for the product principles and roadmap, and [docs/adr/](docs/adr/) for the decisions made so far.
 
-**Status:** Phase 0, formats first. There are example artifacts under [examples/](examples/). JSON Schemas, the canonical serializer, the validator and the `obi validate` / `obi render` commands are next.
+**Status:** Phase 0. Formats, JSON Schemas, the canonical serializer and the validator are done (`packages/formats`). The `obi` CLI with `validate` / `render` on DuckDB is next.
 
 ## Tooling: uv only
 
@@ -13,7 +13,9 @@ uv sync                      # create .venv with Python 3.12 and install all wor
 uv run obi                   # run the CLI
 uv run pytest                # run tests
 uv add --package obi-engine sqlglot   # add a dependency to one package
-uv run python scripts/format_stats.py # line counts of example dashboards
+uv run scripts/format_stats.py       # line counts of example dashboards
+uv run obi-formats validate examples/sales-demo   # validate a project
+uv run obi-formats fmt --check examples           # check canonical form (drop --check to rewrite)
 ```
 
 `uv.lock` is committed. `.python-version` pins 3.12.

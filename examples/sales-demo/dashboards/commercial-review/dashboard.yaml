@@ -36,8 +36,10 @@ pages:
             measure: net_revenue
             target: revenue_target
             sparkline: date.month
+            ignore_filters: [channel, segment]
           - kpi: attainment
             measure: target_attainment
+            ignore_filters: [channel, segment]
             color: "${value < 0.95 ? 'danger' : value < 1 ? 'warning' : 'ok'}"
           - kpi: margin
             measure: gross_margin
@@ -60,10 +62,12 @@ pages:
             mark: line
             x: date.month
             y: [net_revenue, revenue_target]
+            ignore_filters: [channel, segment]
           - chart: attainment_by_region
             mark: bar
             x: region
             y: target_attainment
+            ignore_filters: [channel, segment]
             on_click:
               navigate: regions
               set: { region: "${row.region}" }
@@ -79,6 +83,7 @@ pages:
               - table: lowest_regions
                 rows: [region]
                 values: [net_revenue, revenue_target, target_gap, target_attainment]
+                ignore_filters: [channel, segment]
                 sort: target_attainment
                 limit: 5
                 on_click:
@@ -104,14 +109,16 @@ pages:
     items:
       - text: region_hint
         content: Showing all regions. Pick one in the filter bar or on the summary page.
-        visible: "${filters.region == null}"
+        visible: "${filters.region.count == 0}"
       - row: region_kpis
         items:
           - kpi: region_revenue
             measure: net_revenue
             target: revenue_target
+            ignore_filters: [channel, segment, country]
           - kpi: region_attainment
             measure: target_attainment
+            ignore_filters: [channel, segment, country]
             color: "${value < 0.95 ? 'danger' : value < 1 ? 'warning' : 'ok'}"
           - kpi: region_aov
             measure: aov
@@ -134,6 +141,7 @@ pages:
             x: date.month
             y: target_attainment
             series: region
+            ignore_filters: [channel, segment, country]
       - card: countries
         title: Countries
         items:
