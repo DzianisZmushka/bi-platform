@@ -32,6 +32,32 @@ _md = MarkdownIt("commonmark", {"html": False})
 esc = html.escape
 
 
+# Every property of the dashboard schema, per definition, that this renderer acts on.
+# tests/test_coverage.py fails if the schema has a property that is neither listed here
+# nor marked `x-unsupported` (which the validator reports as "not supported yet").
+RENDERED: dict[str, set[str]] = {
+    "dashboard": {"dashboard", "title", "description", "model", "filters", "pages"},
+    "filter": {"filter", "title", "dimension", "default", "multiple", "pages"},
+    "page": {"page", "title", "description", "visible", "items"},
+    "row": {"row", "title", "description", "visible", "items"},
+    "grid": {"grid", "title", "description", "columns", "visible", "items"},
+    "tabs": {"tabs", "visible", "items"},
+    "tab": {"tab", "title", "visible", "items"},
+    "card": {"card", "title", "description", "visible", "items"},
+    "section": {"section", "title", "description", "visible", "collapsed", "items"},
+    "kpi": {"kpi", "title", "description", "measure", "target", "compare", "sparkline",
+            "ignore_filters", "on_click", "visible", "color"},
+    "chart": {"chart", "title", "description", "mark", "x", "y", "series", "detail", "stack", "where",
+              "ignore_filters", "sort", "limit", "on_click", "visible", "color"},
+    "table": {"table", "title", "description", "rows", "columns", "values", "where", "ignore_filters",
+              "sort", "limit", "totals", "on_click", "visible", "cells"},
+    "text": {"text", "title", "content", "visible"},
+    "button": {"button", "label", "on_click", "visible"},
+    "cell": {"color", "bar"},
+    "on_click": {"navigate", "set"},
+}
+
+
 @dataclass
 class RenderResult:
     html: str
@@ -42,8 +68,10 @@ class _Page:
     """Everything a widget needs while one dashboard is rendered."""
 
     def __init__(self, project: Project, dash_id: str, dash: dict, dashboards: dict[str, dict],
-                 inputs: dict[str, list[str]] | None, as_of: date, mode: str):
+                 inputs: dict[str, list[str]] | None, as_of: date, mode: str,
+                 drill: dict[str, list[str]] | None = None):
         self.project, self.dash_id, self.dash, self.dashboards = project, dash_id, dash, dashboards
+        self.drill = drill or {}  # widget id -> values chosen at each hierarchy level
         self.eng = project.engine(dash["model"])
         self.as_of, self.mode = as_of, mode
         self.errors: list[str] = []
@@ -129,15 +157,27 @@ class _Page:
         params: dict[str, list[str]] = dict(self.inputs) if same else {}
         for k, v in sets.items():
             params[k] = [] if v is None else [_plain(v)]
-        pairs = ([("_set", "1")] if same else []) + [(k, v) for k, vs in params.items() for v in vs]             + [(k, "") for k, vs in params.items() if not vs]
+        pairs = ([("_set", "1")] if same else []) + [(k, v) for k, vs in params.items() for v in vs]
+        pairs += [(k, "") for k, vs in params.items() if not vs]
         return f"/{did}?{urlencode(pairs)}#{pid}" if pairs else f"/{did}#{pid}"
+
+    def drill_href(self, wid: str, path: list[str], page_id: str) -> str | None:
+        """Link that re-renders with widget `wid` drilled to `path` (serve mode only)."""
+        if self.mode == "static":
+            return None
+        pairs = [("_set", "1")] + [(k, v) for k, vs in self.inputs.items() for v in vs]
+        pairs += [(k, "") for k, vs in self.inputs.items() if not vs]
+        pairs += [(f"drill.{w}", v) for w, p in self.drill.items() if w != wid for v in p]
+        pairs += [(f"drill.{wid}", v) for v in path]
+        return f"/{self.dash_id}?{urlencode(pairs)}#{page_id}"
 
 
 # =========================================================================== entry point
 
 
 def render_dashboard(root: str | Path, dash_id: str, inputs: dict[str, list[str]] | None = None,
-                     as_of: date | None = None, mode: str = "static") -> RenderResult:
+                     as_of: date | None = None, mode: str = "static",
+                     drill: dict[str, list[str]] | None = None) -> RenderResult:
     root = Path(root)
     project = Project(root)
     dashboards = {}
@@ -145,14 +185,15 @@ def render_dashboard(root: str | Path, dash_id: str, inputs: dict[str, list[str]
         d = parse(p.read_text(encoding="utf-8")).data
         dashboards[d["dashboard"]] = d
     dash = dashboards[dash_id]
-    page = _Page(project, dash_id, dash, dashboards, inputs, as_of or date.today(), mode)
+    page = _Page(project, dash_id, dash, dashboards, inputs, as_of or date.today(), mode, drill)
     body = []
     for p in dash["pages"]:
         if p.get("visible") is not None and not page.expr(p["visible"], default=True):
             continue
         items = "".join(_node(page, n, p["page"]) for n in p["items"])
+        desc = f'<p class="desc">{esc(p["description"])}</p>' if p.get("description") else ""
         body.append(f'<section class="page" id="{esc(p["page"])}" data-title="{esc(_title_of(p))}">'
-                    f'{items}</section>')
+                    f'{desc}{items}</section>')
     html_text = _document(page, "".join(body))
     return RenderResult(html_text, page.errors)
 
@@ -186,6 +227,8 @@ def _node(page: _Page, node: dict, page_id: str) -> str:
     title = page.expr(node.get("title")) if node.get("title") else None
     children = lambda: "".join(_node(page, c, page_id) for c in node.get("items") or [])  # noqa: E731
     head = f"<h3>{esc(title)}</h3>" if title else ""
+    if node.get("description") and kind in ("row", "grid", "card"):
+        head += f'<p class="desc">{esc(node["description"])}</p>'
     if kind == "row":
         return f'<div class="row" id="w-{esc(nid)}">{head}<div class="row-items">{children()}</div></div>'
     if kind == "grid":
@@ -198,8 +241,9 @@ def _node(page: _Page, node: dict, page_id: str) -> str:
         return f'<div class="card" id="w-{esc(nid)}">{head}{children()}</div>'
     if kind == "section":
         open_ = "" if node.get("collapsed") else " open"
+        desc_html = f'<p class="desc">{esc(node["description"])}</p>' if node.get("description") else ""
         return (f'<details class="section" id="w-{esc(nid)}"{open_}><summary>{esc(title or humanize(nid))}'
-                f'</summary>{children()}</details>')
+                f'</summary>{desc_html}{children()}</details>')
     if kind == "tabs":
         tabs = [t for t in node["items"] if t.get("visible") is None or page.expr(t["visible"], default=True)]
         buttons = "".join(f'<button type="button" data-tab="{esc(t["tab"])}">{esc(_title_of(t))}</button>'
@@ -214,7 +258,9 @@ def _node(page: _Page, node: dict, page_id: str) -> str:
         msg = f"{kind} `{nid}`: {e}"
         page.errors.append(msg)
         inner = f'<div class="widget-error">Could not render {esc(kind)} <code>{esc(nid)}</code>: {esc(str(e))}</div>'
-    return f'<div class="widget {kind}" id="w-{esc(nid)}">{_marker(page, node, page_id)}{inner}</div>'
+    info = (f'<span class="info" title="{esc(node["description"])}">&#9432;</span>'
+            if node.get("description") else "")
+    return f'<div class="widget {kind}" id="w-{esc(nid)}">{info}{_marker(page, node, page_id)}{inner}</div>'
 
 
 def _marker(page: _Page, node: dict, page_id: str) -> str:
@@ -277,10 +323,15 @@ def _kpi(page: _Page, w: dict, page_id: str) -> str:
         srows = _query(page, w, page_id, [m], [w["sparkline"]])
         spec = _spark_spec(page, srows, w["sparkline"], mname, color)
         spark = _chart_div(page, f"{w['kpi']}-spark", spec, height=36)
-    return (f'<div class="kpi-title">{esc(title)}</div>'
+    body = (f'<div class="kpi-title">{esc(title)}</div>'
             f'<div class="kpi-value" style="color:{COLORS.get(color, COLORS["neutral"])}">'
             f'{esc(_format(page, value, fmt, compact=True))}</div>'
-            f'<div class="kpi-sub">{esc(sub)}</div>{spark}')
+            f'<div class="kpi-sub">{esc(sub)}</div>')
+    # `row` for a KPI holds its measure and target values, so `set` may use `${row.<measure>}`.
+    href = page.href(w.get("on_click"), row)
+    if href:
+        body = f'<a class="kpi-link" href="{esc(href)}">{body}</a>'
+    return body + spark
 
 
 def _compare_value(page: _Page, w: dict, page_id: str, m: str):
@@ -297,24 +348,54 @@ def _compare_value(page: _Page, w: dict, page_id: str, m: str):
     return rows[0].get(_name(page, m)) if rows else None
 
 
+def _drill(page: _Page, node: dict, refs: list[str], page_id: str):
+    """Replace the first hierarchy among `refs` by its current drill level (ADR-007).
+    Returns (refs, extra filters, breadcrumb html, drill info or None)."""
+    wid = node[next(iter(node))]
+    for i, ref in enumerate(refs):
+        if not ref or not page.eng.idx.resolve(ref).hierarchy:
+            continue
+        levels = page.eng.idx.levels(page.eng.idx.resolve(ref))
+        path = page.drill.get(wid, [])[:len(levels) - 1]
+        extra = [Filter(levels[j].text, values=[_typed(v, levels[j].field.dtype)]) for j, v in enumerate(path)]
+        level = levels[len(path)]
+        crumbs = ""
+        if path:
+            links = [f'<a href="{esc(page.drill_href(wid, [], page_id) or "")}">All</a>']
+            links += [f'<a href="{esc(page.drill_href(wid, path[:j + 1], page_id) or "")}">{esc(v)}</a>'
+                      for j, v in enumerate(path)]
+            crumbs = f'<div class="crumbs">{" &rsaquo; ".join(links)}</div>'
+        info = {"wid": wid, "path": path, "level": level.field.name, "deeper": len(path) + 1 < len(levels)}
+        return refs[:i] + [level.text] + refs[i + 1:], extra, crumbs, info
+    return refs, [], "", None
+
+
+def _drill_click(page: _Page, info, row: dict, page_id: str) -> str | None:
+    if not info or not info["deeper"] or row.get(info["level"]) is None:
+        return None
+    return page.drill_href(info["wid"], info["path"] + [_plain(row[info["level"]])], page_id)
+
+
 def _chart(page: _Page, c: dict, page_id: str) -> str:
-    ys = c["y"] if isinstance(c["y"], list) else [c["y"]]
-    x = c.get("x")
+    raw_ys = c["y"] if isinstance(c["y"], list) else [c["y"]]
+    refs, extra, crumbs, info = _drill(page, c, [c.get("x") or ""] + raw_ys, page_id)
+    x, ys = refs[0] or None, refs[1:]
+    c = {**c, "x": x, "y": ys}
     fields = ([x] if x else []) + ys
     measures = [f for f in fields if _kind(page, f) == "measure"]
     dims = [f for f in fields if _kind(page, f) != "measure"]
     dims += [d for d in (c.get("series"), c.get("detail")) if d]
-    rows = _query(page, c, page_id, measures, dims, c.get("sort"), c.get("limit"))
+    rows = _query(page, c, page_id, measures, dims, _sort(page, c.get("sort")), c.get("limit"), extra)
     first_measure = _name(page, measures[0])
     for r in rows:
         if c.get("color"):
             r["_color"] = COLORS.get(page.expr(c["color"], value=r.get(first_measure), row=r), COLORS["neutral"])
-        href = page.href(c.get("on_click"), r)
+        href = page.href(c.get("on_click"), r) or _drill_click(page, info, r, page_id)
         if href:
             r["_href"] = href
     spec = _chart_spec(page, c, rows, x, ys, measures)
     title = page.expr(c.get("title")) if c.get("title") else _default_title(page, c, x, ys)
-    return f'<div class="widget-title">{esc(title)}</div>' + _chart_div(page, c["chart"], spec)
+    return f'<div class="widget-title">{esc(title)}</div>{crumbs}' + _chart_div(page, c["chart"], spec)
 
 
 def _default_title(page: _Page, c: dict, x, ys) -> str:
@@ -418,11 +499,12 @@ def _spark_spec(page: _Page, rows, dim, mname, color) -> dict:
 
 
 def _table(page: _Page, t: dict, page_id: str) -> str:
-    rows_dims = list(t.get("rows") or [])
+    rows_dims, extra, crumbs, info = _drill(page, t, list(t.get("rows") or []), page_id)
     col_dims = list(t.get("columns") or [])
     values = list(t["values"])
+    # With pivot columns, `limit` counts output rows (row keys), so it applies after grouping.
     limit = None if col_dims else t.get("limit")
-    data = _query(page, t, page_id, values, rows_dims + col_dims, t.get("sort"), limit)
+    data = _query(page, t, page_id, values, rows_dims + col_dims, _sort(page, t.get("sort")), limit, extra)
     rnames = [_name(page, d) for d in rows_dims]
     cnames = [_name(page, d) for d in col_dims]
     vnames = [_name(page, v) for v in values]
@@ -439,6 +521,8 @@ def _table(page: _Page, t: dict, page_id: str) -> str:
         for v in vnames:
             g["_cells"][(ck, v)] = r.get(v)
         g["_row"].update({v: r.get(v) for v in vnames} if not cnames else {})
+    if col_dims and t.get("limit"):
+        grouped = dict(list(grouped.items())[:t["limit"]])
     columns = [(ck, v) for ck in col_keys for v in vnames]
     maxabs = {col: max((abs(g["_cells"].get(col) or 0) for g in grouped.values()), default=0) or 1
               for col in columns}
@@ -452,7 +536,7 @@ def _table(page: _Page, t: dict, page_id: str) -> str:
     head += "".join(f'<th class="num">{esc(col_label(ck, v))}</th>' for ck, v in columns)
     body = []
     for rk, g in grouped.items():
-        href = page.href(t.get("on_click"), g["_row"])
+        href = page.href(t.get("on_click"), g["_row"]) or _drill_click(page, info, g["_row"], page_id)
         attrs = f' class="link" data-href="{esc(href)}"' if href else ""
         tds = "".join(f"<td>{esc(_dim_text(page, rows_dims[i], x))}</td>" for i, x in enumerate(rk))
         for ck, v in columns:
@@ -462,14 +546,14 @@ def _table(page: _Page, t: dict, page_id: str) -> str:
         body.append(f"<tr{attrs}>{tds}</tr>")
     foot = ""
     if t.get("totals"):
-        tot = _query(page, {**t, "where": t.get("where")}, page_id, values, col_dims)
+        tot = _query(page, t, page_id, values, col_dims, extra=extra)
         totals = {(tuple(r[c] for c in cnames), v): r.get(v) for r in tot for v in vnames}
         tds = f'<td colspan="{len(rows_dims)}">Total</td>' if rows_dims else ""
         tds += "".join(f'<td class="num">{esc(_format(page, totals.get(col), _fmt_of(page, values[vnames.index(col[1])])))}</td>'
                        for col in columns)
         foot = f"<tfoot><tr>{tds}</tr></tfoot>"
     title = page.expr(t.get("title")) if t.get("title") else humanize(t["table"])
-    return (f'<div class="widget-title">{esc(title)}</div><div class="table-scroll"><table>'
+    return (f'<div class="widget-title">{esc(title)}</div>{crumbs}<div class="table-scroll"><table>'
             f'<thead><tr>{head}</tr></thead><tbody>{"".join(body)}</tbody>{foot}</table></div>')
 
 
@@ -497,6 +581,13 @@ def _button(page: _Page, b: dict, page_id: str) -> str:
 
 
 # =========================================================================== helpers
+
+
+def _sort(page: _Page, sort: str | None) -> str | None:
+    """A sort on a hierarchy name sorts by the level on screen, i.e. the default order."""
+    if not sort or page.eng.idx.resolve(sort.lstrip("-")).hierarchy:
+        return None
+    return sort
 
 
 def _kind(page: _Page, ref: str) -> str:
@@ -649,7 +740,7 @@ def _document(page: _Page, body: str) -> str:
 </head><body>
 <header><div class="title"><h1>{esc(d.get("title") or d["dashboard"])}</h1>
 <p>{esc(d.get("description") or "")}</p></div>
-<div class="meta">As of {page.as_of.isoformat()} · model <code>{esc(d["model"])}</code></div></header>
+<div class="meta">As of {page.as_of.isoformat()} · model {esc(page.eng.idx.title or "")} <code>{esc(d["model"])}</code></div></header>
 {_filter_bar(page)}
 <nav class="pages">{tabs}</nav>
 {errors}<main>{body}</main>

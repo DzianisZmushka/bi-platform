@@ -45,7 +45,7 @@ def test_render_all_dashboards(project, capsys):
     assert [Path(p).name for p in out] == ["commercial-review.html", "revenue-overview.html"]
     html = (project / ".obi/render/commercial-review.html").read_text(encoding="utf-8")
     assert 'class="widget-error"' not in html and 'class="render-errors"' not in html
-    assert html.count('class="widget kpi"') == 14 and html.count('class="widget chart"') == 14
+    assert html.count('class="widget kpi"') == 15 and html.count('class="widget chart"') == 14
     assert 'id="regions"' in html and 'href="revenue-overview.html#overview"' in html
 
 

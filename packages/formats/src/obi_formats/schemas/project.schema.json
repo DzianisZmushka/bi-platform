@@ -32,7 +32,12 @@
         "duckdb": {
           "type": ["object", "null"],
           "description": "Empty: in-memory database.",
-          "properties": { "database": { "type": "string" } },
+          "properties": {
+            "database": {
+              "type": "string",
+              "x-unsupported": "Phase 0 runs DuckDB in memory; list the files under `tables` instead"
+            }
+          },
           "additionalProperties": false
         },
         "tables": {

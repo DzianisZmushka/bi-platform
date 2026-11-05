@@ -100,6 +100,7 @@ Model format + dashboard format + JSON Schemas + canonical serializer + validato
 - When unsure whether something belongs in Git or in the runtime database, apply the rule: *rules, schemas and mappings → Git; identities, secrets, data, logs → database.*
 - Measure the format: track line count of the example dashboards. Growth without new capability is a regression.
 - Every new format property ships with a round-trip test (`packages/formats/tests/test_roundtrip.py`) that puts a comment next to it: a full-line comment above it and a trailing comment on its line. The test asserts that `canonicalize` keeps both and that a second pass is a no-op. Comment attachment is our own code (ADR-006), not the YAML library's, so each new shape needs its own proof.
+- Every property the validator accepts must have runtime behaviour. Something the renderer or engine does not support yet must be marked `x-unsupported` in the JSON Schema, so the validator reports "`<property>` is not supported yet: <reason>". It must never be silently ignored. The registries are `RENDERED` in `packages/cli/src/obi_cli/render.py` and `HANDLED_MODEL` / `HANDLED_PROJECT` / `DOCUMENTATION_ONLY` in `packages/engine/src/obi_engine/engine.py`. `packages/cli/tests/test_coverage.py` walks the schemas and fails on any property that is not covered. Docs (README, examples) must not describe behaviour that the code lacks.
 - Document decisions in `docs/adr/` as short ADRs (context, decision, consequences).
 
 ## Explicit non-goals (for now)

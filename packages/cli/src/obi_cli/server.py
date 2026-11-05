@@ -13,6 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from obi_formats.artifacts import parse
 from obi_formats.validate import validate_project
 
 from .render import dashboard_ids, filter_ids, render_dashboard
@@ -33,7 +34,10 @@ def serve(root: Path, port: int, as_of: date | None):
                 if not did:
                     links = "".join(f'<li><a href="/{d}">{html.escape(t)}</a> <code>{d}</code></li>'
                                     for d, t in known)
-                    return self._send(200, _page(f"Project {root.name}", f"<ul>{links}</ul>"))
+                    proj = parse((root / "project.yaml").read_text(encoding="utf-8")).data
+                    desc = f"<p>{html.escape(proj.get('description') or '')}</p>"
+                    return self._send(200, _page(proj.get("title") or f"Project {root.name}",
+                                                 f"{desc}<ul>{links}</ul>"))
                 if did not in {d for d, _ in known}:
                     return self._send(404, _page("Not found", f"No dashboard <code>{html.escape(did)}</code>."))
                 qs = parse_qs(url.query, keep_blank_values=True)
@@ -45,7 +49,8 @@ def serve(root: Path, port: int, as_of: date | None):
                 else:
                     # Partial (link from another dashboard): given filters on top of defaults.
                     inputs = {fid: qs[fid] for fid in fids if fid in qs} or None
-                result = render_dashboard(root, did, inputs, as_of, mode="serve")
+                drill = {k[len("drill."):]: v for k, v in qs.items() if k.startswith("drill.")}
+                result = render_dashboard(root, did, inputs, as_of, mode="serve", drill=drill)
                 self._send(200, result.html)
             except Exception:
                 self._send(500, _page("Render failed", f"<pre>{html.escape(traceback.format_exc())}</pre>"))

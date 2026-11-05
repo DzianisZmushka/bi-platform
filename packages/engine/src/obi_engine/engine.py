@@ -27,6 +27,29 @@ AGG_SQL = {"sum": "SUM({})", "count": "COUNT({})", "count_distinct": "COUNT(DIST
 DOUBLE_AGGS = ("sum", "avg")  # cast so integer columns do not come back as DECIMAL(38)
 
 
+# Model and project properties that have runtime behaviour, per schema definition: used by
+# this engine, by the model index (joins, hierarchies) or by the validator (grain).
+# packages/cli/tests/test_coverage.py checks these against the schemas.
+HANDLED_MODEL: dict[str, set[str]] = {
+    "model": {"model", "title", "entities", "hierarchies"},
+    "entity": {"table", "key", "grain", "joins", "dimensions", "measures"},
+    "dimension": {"label", "column", "type"},
+    "measure": {"sum", "count", "count_distinct", "avg", "min", "max", "calc", "label", "where", "grain",
+                "format"},
+}
+HANDLED_PROJECT: dict[str, set[str]] = {
+    "project": {"project", "title", "description", "default_connection", "currency", "connections"},
+    "connection": {"duckdb", "tables"},
+}
+# Read by people and LLMs; no runtime behaviour by design, so not "silently ignored".
+DOCUMENTATION_ONLY: dict[str, set[str]] = {
+    "model": {"description"},
+    "entity": {"description"},
+    "dimension": {"description"},
+    "measure": {"description"},
+}
+
+
 class EngineError(Exception):
     pass
 

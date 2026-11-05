@@ -41,15 +41,20 @@ pages:
             measure: target_attainment
             ignore_filters: [channel, segment]
             color: "${value < 0.95 ? 'danger' : value < 1 ? 'warning' : 'ok'}"
+          - kpi: orders
+            measure: orders
+            compare: previous_year
           - kpi: margin
             measure: gross_margin
             compare: previous_year
           - kpi: margin_rate
             measure: margin_pct
             compare: previous_year
+            color: "${value < 0.35 ? 'danger' : 'ok'}"
           - kpi: customers
             measure: active_customers
             compare: previous_year
+            on_click: { navigate: top_customers }
           - kpi: returns
             measure: return_rate
             compare: previous_year
@@ -100,6 +105,9 @@ pages:
           - button: open_products
             label: Products & customers
             on_click: { navigate: products }
+          - button: open_top_customers
+            label: Top customers
+            on_click: { navigate: top_customers }
           - button: open_overview
             label: Revenue overview dashboard
             on_click: { navigate: revenue-overview/overview }
@@ -290,3 +298,24 @@ pages:
       - button: back_to_regions
         label: Back to regional performance
         on_click: { navigate: regions }
+
+  - page: top_customers
+    title: Top customers
+    items:
+      - text: top_customers_intro
+        content: Ten largest customers by net revenue for the selected period. Click a customer to open its product detail.
+      - table: top_customers_table
+        rows: [customer_name, segment, country, region]
+        values: [net_revenue, orders, aov, margin_pct, return_rate]
+        sort: -net_revenue
+        limit: 10
+        on_click:
+          navigate: products
+          set: { customer: "${row.customer_name}" }
+        cells:
+          net_revenue: { bar: true }
+          margin_pct: { color: "${value < 0.35 ? 'danger' : 'ok'}" }
+          return_rate: { color: "${value > 0.04 ? 'danger' : 'neutral'}" }
+      - button: back_to_summary_from_customers
+        label: Back to summary
+        on_click: { navigate: summary }

@@ -75,6 +75,7 @@ def _what(want: tuple[str, ...]) -> str:
 class ModelIndex:
     def __init__(self, name: str, data: dict):
         self.name = name
+        self.title = data.get("title") if isinstance(data.get("title"), str) else None
         ents = data.get("entities")
         self.entities: dict[str, dict] = {k: v for k, v in (ents or {}).items() if isinstance(v, dict)} \
             if isinstance(ents, dict) else {}

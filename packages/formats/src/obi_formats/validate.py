@@ -148,6 +148,27 @@ def _load(rel: str, text: str, issues: list[Issue]) -> _Artifact | None:
 def _check_structure(art: _Artifact):
     schema = get_schema(art.type)
     _check_element(schema, art.report, art.data, schema.root_name, (), None)
+    _check_unsupported(schema, art.report, art.data, schema.root(), ())
+
+
+def _check_unsupported(schema: Schema, report: _Reporter, value: Any, s: dict, path: tuple):
+    """A property marked `x-unsupported` is accepted by the schema (so the message can be
+    precise) but has no runtime behaviour yet: using it is an error, never silently ignored."""
+    s = schema.resolve(s)
+    if isinstance(value, list):
+        items = s.get("items", {})
+        for i, item in enumerate(value):
+            _check_unsupported(schema, report, item, schema.item(items, item) if items else {}, path + (i,))
+        return
+    if not isinstance(value, dict):
+        return
+    for k, v in value.items():
+        sub = schema.prop(s, k)
+        if "x-unsupported" in sub:
+            label, rest = _locate(schema, schema.root_name, list(path) + [k])
+            report(path + (k,), label, f"`{_path_text(rest)}` is not supported yet: {sub['x-unsupported']}")
+            continue
+        _check_unsupported(schema, report, v, sub, path + (k,))
 
 
 def _check_element(schema: Schema, report: _Reporter, value: Any, def_name: str, path: tuple,
@@ -447,7 +468,8 @@ class _DashboardCheck:
         self._check_sort_and_cells(w, path, label, shown, refs)
         self._check_grain(w, path, label, page, refs, where_refs)
 
-        row_fields = sorted({n for _, r in refs for n in self._names(r)})
+        # `row` holds the fields the widget queries; a KPI's sparkline is a separate series.
+        row_fields = sorted({n for p, r in refs if p != "sparkline" for n in self._names(r)})
         data_names = ("value", "row", "filters", "user")
         self._exprs(w, path, label, {"title", "visible", "content"}, names=("filters", "user"))
         if kind in ("kpi", "chart"):
