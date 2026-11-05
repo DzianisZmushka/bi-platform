@@ -80,7 +80,7 @@ def test_unsupported_property_is_a_validator_error():
     text = (DEMO / "project.yaml").read_text(encoding="utf-8")
     broken = text.replace("    duckdb:\n", "    duckdb: { database: sales.duckdb }\n")
     assert broken != text
-    msgs = [i.text for i in validate_project(DEMO, {"project.yaml": broken})]
+    msgs = [i.text for i in validate_project(DEMO, {"project.yaml": broken}) if i.severity != "info"]
     assert msgs == ["project `sales-demo`, connection `local`: `duckdb.database` is not supported yet: "
                     "Phase 0 runs DuckDB in memory; list the files under `tables` instead"]
 
@@ -117,7 +117,7 @@ def test_pivot_table_respects_limit(tmp_path):
                       "                    values: [net_revenue]\n                    limit: 3\n                    totals: true\n")
     assert new.count("limit: 3") == 1
     f.write_text(new, encoding="utf-8")
-    assert validate_project(dst) == []
+    assert [i for i in validate_project(dst) if i.severity != "info"] == []
     html = render_dashboard(dst, "commercial-review", None, AS_OF).html
     table = re.search(r'id="w-segment_table">.*?<tbody>(.*?)</tbody>', html, re.S).group(1)
     assert table.count("<tr") == 3
@@ -133,7 +133,7 @@ def test_descriptions_are_rendered(tmp_path):
     new = new.replace("      - table: top_customers\n", "      - table: top_customers\n"
                       "        description: Ranked by net revenue.\n")
     f.write_text(new, encoding="utf-8")
-    assert validate_project(dst) == []
+    assert [i for i in validate_project(dst) if i.severity != "info"] == []
     html = render_dashboard(dst, "revenue-overview", None, AS_OF).html
     assert '<p class="desc">Page note.</p>' in html
     assert 'class="info" title="Ranked by net revenue."' in html

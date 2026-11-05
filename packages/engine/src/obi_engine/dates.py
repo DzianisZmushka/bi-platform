@@ -65,7 +65,11 @@ def shift_period(r: DateRange) -> DateRange:
     return r[0] - timedelta(days), r[0] - timedelta(1)
 
 
+FISCAL_PRESETS = ("this_fiscal_year", "last_fiscal_year", "fiscal_year_to_date", "this_fiscal_period",
+                  "last_fiscal_period")  # resolved from the calendar table by the engine (ADR-009)
+
+
 def label(value: str, r: DateRange) -> str:
-    if value in PRESETS:
+    if value in PRESETS or value in FISCAL_PRESETS:
         return value.replace("_", " ").capitalize()
     return r[0].isoformat() if r[0] == r[1] else f"{r[0].isoformat()} – {r[1].isoformat()}"

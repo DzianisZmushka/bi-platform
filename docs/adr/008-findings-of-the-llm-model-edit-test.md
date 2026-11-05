@@ -60,3 +60,7 @@ Both the prefixed and the bare form of a `where:` that referenced `customers.sig
 - A project without `catalog.json` falls back to reading local data files, with a warning to run `obi catalog`.
 
 **Non-canonical input is not an error.** An LLM or a person may write keys in any order or leave out the final newline. Validation checks meaning, not layout. Every upload or commit path in Phase 1 runs `fmt` first, so what lands in Git is always canonical. `obi-formats fmt --check` stays available for CI on repositories that want to enforce it. The example README states the key order, so LLM output is canonical more often.
+
+## Update: composite-key joins shipped
+
+Composite-key joins were pulled forward from Phase 1 for `examples/erp-sales` and are done ([ADR-009](009-erp-sources-joins-currency-fiscal.md)): `joins: { order_items: [AUBEL, AUPOS] }`. The "not supported yet" message is gone. A join with the wrong number of columns now gets an error that spells out the expected list. The sales-demo `returns` entity is linked to `order_lines` on `[order_id, line_no]`.

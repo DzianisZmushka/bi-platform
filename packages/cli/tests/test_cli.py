@@ -127,3 +127,14 @@ def test_without_a_catalogue_columns_come_from_files_with_a_warning(project, cap
     (project / "catalog.json").unlink()
     assert main(["validate", str(project)]) == 0
     assert "warning: project `sales-demo`: no catalog.json" in capsys.readouterr().err
+
+
+def test_erp_dashboard_renders(capsys):
+    erp = DEMO.parent / "erp-sales"
+    for mode in ("static", "serve"):
+        result = render_dashboard(erp, "order-to-cash", None, AS_OF, mode=mode)
+        assert result.errors == []
+    html = render_dashboard(erp, "order-to-cash", None, AS_OF, mode="serve",
+                            drill={"product_margin": ["Pumps"]}).html
+    assert '<div class="crumbs">' in html and "Centrifugal" in html
+    assert "FY2026 P07" in html

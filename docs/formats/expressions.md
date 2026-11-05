@@ -60,7 +60,8 @@ different in each place:
 
 | Where | Names refer to | Example |
 |---|---|---|
-| `sum:`, `count:`, `count_distinct:`, `avg:`, `min:`, `max:` | columns of the entity's own table, never prefixed | `quantity * unit_price * (1 - discount)` |
+| `sum:`, `count:`, `count_distinct:`, `avg:`, `min:`, `max:` | columns of the entity's own table, never prefixed, and the entity's `rollups` | `quantity * unit_price * (1 - discount)`, `(KWMENG - billed_quantity) * NETWR / KWMENG` |
+| join foreign keys, lookup `match`, rollup bodies | columns of one table, never prefixed | `left(PRDHA, 5)`, `FKIMG` |
 | `where:` | model dimensions, bare or entity-prefixed, optionally with a time grain, from any entity reachable through joins | `segment = 'Enterprise'`, `year(signup_date) = year(date)`, `date.month = '2026-03-01'` |
 | `calc:` | measures | `net_revenue / orders` |
 
@@ -72,7 +73,7 @@ different in each place:
 | comparison | `= == != <> < <= > >=`, `in (...)`, `between a and b`, `is null`, `is not null` |
 | boolean | `and`, `or`, `not`, `true`, `false` |
 | literals | numbers, `'text'`, `null`. A date is a text literal such as `'2026-03-01'` |
-| functions | `year(x)`, `month(x)`, `quarter(x)`, `date_diff('day'\|'week'\|'month'\|'quarter'\|'year', start, end)`, `coalesce(a, b, ...)`, `case when ... then ... else ... end` |
+| functions | `year(x)`, `month(x)`, `quarter(x)`, `date_diff('day'\|'week'\|'month'\|'quarter'\|'year', start, end)`, `coalesce(a, b, ...)`, `left(text, n)`, `case when ... then ... else ... end` |
 
 Anything else is a validation error: "function `upper` is not supported in column expressions". Every name is
 resolved at validation time, with the same "did you mean" help as dashboard references. Every table and column

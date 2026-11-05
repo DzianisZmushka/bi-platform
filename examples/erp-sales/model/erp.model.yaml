@@ -1,0 +1,111 @@
+model: erp
+title: Order to cash
+description: SAP SD sales orders (VBAK/VBAP) and billing (VBRP) with their master data, reported in USD.
+
+currency:
+  target: USD
+  rates: { table: tcurr, currency: FCURR, month: GDATU, rate: UKURS }
+
+entities:
+  order_items:
+    description: Sales order items (VBAP). Amounts are in the order's document currency.
+    table: vbap
+    key: [VBELN, POSNR]
+    currency: { code: document_currency, date: order_date }
+    joins: { orders: VBELN, materials: MATNR }
+    rollups:
+      billed_quantity: { sum: FKIMG, from: billing_items }
+    dimensions:
+      item: { column: POSNR }
+      rejection_reason: { column: ABGRU }
+    measures:
+      order_value: { sum: NETWR, format: currency }
+      order_value_usd: { sum: NETWR, convert: USD, format: currency }
+      cost_usd: { sum: WAVWR, convert: USD, format: currency }
+      margin: { calc: order_value_usd - cost_usd, format: currency }
+      margin_pct: { calc: margin / order_value_usd, format: percent }
+      billable_value_usd:
+        sum: NETWR
+        where: rejection_reason is null
+        convert: USD
+        format: currency
+      open_order_value_usd:
+        sum: (KWMENG - billed_quantity) * NETWR / KWMENG
+        where: rejection_reason is null
+        convert: USD
+        format: currency
+      return_value_usd: { sum: NETWR, where: order_type = 'ZRE', convert: USD, format: currency }
+      order_count: { count_distinct: VBELN, format: integer }
+      item_count: { count: POSNR, format: integer }
+      rejected_items: { count: POSNR, where: rejection_reason is not null, format: integer }
+      rejection_rate: { calc: rejected_items / item_count, format: percent }
+
+  orders:
+    table: vbak
+    key: VBELN
+    joins: { calendar: ERDAT, customers: KUNNR, sales_orgs: VKORG }
+    dimensions:
+      sales_order: { column: VBELN }
+      order_date: { column: ERDAT, type: date }
+      order_type: { column: AUART }
+      document_currency: { column: WAERK }
+
+  billing_items:
+    description: Billing items (VBRP), linked to the order item they bill; dated and converted at billing.
+    table: vbrp
+    key: [VBELN, POSNR]
+    currency: { code: document_currency, date: billing_date }
+    joins:
+      calendar: FKDAT
+      order_items: [AUBEL, AUPOS]
+    dimensions:
+      billing_date: { column: FKDAT, type: date }
+    measures:
+      billed_value_usd: { sum: NETWR, convert: USD, format: currency }
+      billed_by_order_date_usd: { sum: NETWR, date: order_date, convert: USD, format: currency }
+      billed_pct: { calc: billed_value_usd / billable_value_usd, format: percent }
+
+  calendar:
+    description: Fiscal year starts 1 April; periods come from the table, not from date arithmetic.
+    table: calendar
+    key: DATUM
+    dimensions:
+      date:
+        column: DATUM
+        type: date
+        fiscal: { year: FISCAL_YEAR, period: FISCAL_PERIOD }
+
+  customers:
+    table: kna1
+    key: KUNNR
+    dimensions:
+      customer: { column: NAME1 }
+      country: { column: LAND1 }
+
+  sales_orgs:
+    table: tvko
+    key: VKORG
+    joins: { company_codes: BUKRS }
+    dimensions:
+      sales_org: { column: VTEXT }
+
+  company_codes:
+    table: t001
+    key: BUKRS
+    dimensions:
+      company_code: { column: BUTXT }
+
+  materials:
+    table: mara
+    key: MATNR
+    dimensions:
+      material: { column: MAKTX }
+      material_group: { column: MATKL }
+      product_line: { lookup: t179t.VTEXT, key: PRODH, match: "left(PRDHA, 5)" }
+      product_family: { lookup: t179t.VTEXT, key: PRODH, match: "left(PRDHA, 10)" }
+      product_model: { lookup: t179t.VTEXT, key: PRODH, match: PRDHA }
+
+hierarchies:
+  product: [product_line, product_family, product_model]
+  organisation: [company_code, sales_org]
+  geography: [country, customer]

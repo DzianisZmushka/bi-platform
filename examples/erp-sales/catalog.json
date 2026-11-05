@@ -1,0 +1,73 @@
+{
+  "connection": "local",
+  "tables": {
+    "vbak": {
+      "VBELN": "VARCHAR",
+      "ERDAT": "DATE",
+      "AUDAT": "DATE",
+      "VKORG": "VARCHAR",
+      "KUNNR": "VARCHAR",
+      "WAERK": "VARCHAR",
+      "AUART": "VARCHAR",
+      "VKBUR": "VARCHAR"
+    },
+    "vbap": {
+      "VBELN": "VARCHAR",
+      "POSNR": "VARCHAR",
+      "MATNR": "VARCHAR",
+      "KWMENG": "BIGINT",
+      "NETWR": "DOUBLE",
+      "WAVWR": "DOUBLE",
+      "ABGRU": "VARCHAR"
+    },
+    "vbrp": {
+      "VBELN": "VARCHAR",
+      "POSNR": "VARCHAR",
+      "AUBEL": "VARCHAR",
+      "AUPOS": "VARCHAR",
+      "FKDAT": "DATE",
+      "FKIMG": "BIGINT",
+      "NETWR": "DOUBLE"
+    },
+    "kna1": {
+      "KUNNR": "VARCHAR",
+      "NAME1": "VARCHAR",
+      "LAND1": "VARCHAR",
+      "KTOKD": "VARCHAR",
+      "ERDAT": "DATE"
+    },
+    "tvko": {
+      "VKORG": "VARCHAR",
+      "VTEXT": "VARCHAR",
+      "BUKRS": "BIGINT"
+    },
+    "t001": {
+      "BUKRS": "BIGINT",
+      "BUTXT": "VARCHAR",
+      "WAERS": "VARCHAR"
+    },
+    "mara": {
+      "MATNR": "VARCHAR",
+      "MAKTX": "VARCHAR",
+      "MATKL": "VARCHAR",
+      "PRDHA": "VARCHAR",
+      "MEINS": "VARCHAR"
+    },
+    "t179t": {
+      "PRODH": "VARCHAR",
+      "VTEXT": "VARCHAR",
+      "STUFE": "BIGINT"
+    },
+    "tcurr": {
+      "FCURR": "VARCHAR",
+      "GDATU": "DATE",
+      "UKURS": "DOUBLE"
+    },
+    "calendar": {
+      "DATUM": "DATE",
+      "FISCAL_YEAR": "BIGINT",
+      "FISCAL_PERIOD": "BIGINT",
+      "PERIOD_START": "DATE"
+    }
+  }
+}

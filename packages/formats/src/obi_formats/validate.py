@@ -23,6 +23,8 @@ from .schema import Schema, artifact_type, get_schema
 from .yamlio import Document, FormatError
 
 THEME_COLORS = ("ok", "warning", "danger", "neutral", "accent")
+FISCAL_PRESETS = ("this_fiscal_year", "last_fiscal_year", "fiscal_year_to_date", "this_fiscal_period",
+                  "last_fiscal_period")
 DATE_PRESETS = ("today", "yesterday", "this_week", "last_week", "this_month", "last_month",
                 "this_quarter", "last_quarter", "this_year", "last_year", "year_to_date",
                 "last_7_days", "last_30_days", "last_90_days", "last_12_months")
@@ -440,11 +442,18 @@ class _DashboardCheck:
         if ref:
             self.filter_refs[fid] = ref
             default = f.get("default")
-            if ref.field.dtype == "date" and isinstance(default, str) \
-                    and default not in DATE_PRESETS and not re.match(r"^\d{4}-\d{2}-\d{2}$", default):
+            fiscal = isinstance(ref.field.spec.get("fiscal"), dict)
+            presets = DATE_PRESETS + (FISCAL_PRESETS if fiscal else ())
+            if ref.field.dtype == "date" and isinstance(default, str) and default in FISCAL_PRESETS \
+                    and not fiscal:
+                self.report(path + ("default",), label,
+                            f"`default: {default}` needs a fiscal calendar on dimension `{ref.field.name}`; "
+                            f"add `fiscal: {{ year: <column>, period: <column> }}` to it in the model")
+            elif ref.field.dtype == "date" and isinstance(default, str) \
+                    and default not in presets and not re.match(r"^\d{4}-\d{2}-\d{2}$", default):
                 self.report(path + ("default",), label,
                             f"`default` for a date filter must be a date (2026-01-31) or one of "
-                            f"{', '.join(DATE_PRESETS)}; got `{default}`" + did_you_mean(default, DATE_PRESETS))
+                            f"{', '.join(presets)}; got `{default}`" + did_you_mean(default, presets))
         for j, pid in enumerate(f.get("pages") or []):
             if isinstance(pid, str) and pid not in self.page_ids:
                 self.report(path + ("pages", j), label,
@@ -521,6 +530,24 @@ class _DashboardCheck:
             names = ("row", "filters", "user") if kind != "button" else ("filters", "user")
             self._on_click(w["on_click"], path + ("on_click",), label, names, row_fields)
 
+    def _currency_code(self, f) -> Ref | None:
+        """The currency-code dimension of a measure in document currency (calc: of its parts)."""
+        stack = [f]
+        while stack:
+            g = stack.pop()
+            text = self.idx.currency_code_dimension(g)
+            if text:
+                try:
+                    return self.idx.resolve(text, ("dimension",))
+                except RefError:
+                    return None
+            for r in self.idx.calc_refs(g):
+                try:
+                    stack.append(self.idx.resolve(r, ("measure",)).field)
+                except RefError:
+                    pass
+        return None
+
     def _names(self, r: Ref) -> list[str]:
         if r.field:
             return [r.field.name]
@@ -550,6 +577,22 @@ class _DashboardCheck:
             return
         dims = [(p, lv) for p, r in refs if r.kind != "measure" for lv in self.idx.levels(r)]
         grains = {m.field: self.idx.measure_grain(m.field) for m in measures}
+
+        # ADR-009: an amount in document currency cannot be added up across currencies.
+        shown = {(lv.field.entity, lv.field.name) for _, lv in dims}
+        for m in measures:
+            if not self.idx.per_currency(m.field):
+                continue
+            code = self._currency_code(m.field)
+            if code and (code.field.entity, code.field.name) not in shown:
+                twin = self.idx.converted_counterpart(m.field)
+                use = f"`{twin.name}`" if twin else "a measure with `convert:`"
+                if w.get("kpi"):
+                    fix = f"a KPI shows one number, so use {use}"
+                else:
+                    fix = f"show `{code.field.name}` in this widget (rows, columns or series), or use {use}"
+                self.report(path, label, f"measure `{m.name}` is in document currency and cannot be added up "
+                                         f"across currencies; {fix}")
 
         for m in measures:
             g = grains[m.field]

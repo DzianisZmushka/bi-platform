@@ -52,11 +52,13 @@ entities:
   returns:
     description: |
       One row per returned order line, with the refund paid and the reason given.
-      Not linked to order_lines (its key has two columns); sliceable by return date and reason only.
+      Linked to its order line on both key columns, so refunds slice by product and customer too.
+      The date of a return is its return date.
     table: returns
     key: return_id
-    grain: [date, reason]
-    joins: { calendar: return_date }
+    joins:
+      calendar: return_date
+      order_lines: [order_id, line_no]
     dimensions:
       reason: { label: Return reason }
     measures:

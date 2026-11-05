@@ -9,92 +9,244 @@
       "type": "object",
       "x-kind": "model",
       "properties": {
-        "model": { "$ref": "#/$defs/artifact_id" },
-        "title": { "type": "string" },
-        "description": { "type": "string" },
+        "model": {
+          "$ref": "#/$defs/artifact_id"
+        },
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "currency": {
+          "$ref": "#/$defs/currency"
+        },
         "entities": {
           "type": "object",
           "minProperties": 1,
           "x-blank-lines": true,
-          "propertyNames": { "$ref": "#/$defs/id" },
-          "additionalProperties": { "$ref": "#/$defs/entity" }
+          "propertyNames": {
+            "$ref": "#/$defs/id"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/entity"
+          }
         },
         "hierarchies": {
           "type": "object",
-          "propertyNames": { "$ref": "#/$defs/id" },
-          "additionalProperties": { "$ref": "#/$defs/hierarchy" }
+          "propertyNames": {
+            "$ref": "#/$defs/id"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/hierarchy"
+          }
         }
       },
-      "required": ["model", "entities"],
+      "required": [
+        "model",
+        "entities"
+      ],
       "additionalProperties": false
     },
     "entity": {
       "type": "object",
       "x-element": "entity",
       "properties": {
-        "description": { "type": "string" },
-        "table": { "type": "string", "minLength": 1 },
+        "description": {
+          "type": "string"
+        },
+        "table": {
+          "type": "string",
+          "minLength": 1
+        },
         "key": {
-          "type": ["string", "array"], "minLength": 1, "minItems": 1,
-          "items": { "type": "string", "minLength": 1 }
+          "type": [
+            "string",
+            "array"
+          ],
+          "minLength": 1,
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         },
         "grain": {
           "$ref": "#/$defs/refs",
           "description": "Dimensions this entity's measures can be sliced and filtered by. Default: every dimension reachable through joins, at full detail."
         },
+        "currency": {
+          "$ref": "#/$defs/entity_currency"
+        },
         "joins": {
           "type": "object",
-          "description": "Many-to-one joins: <target entity>: <foreign key column of this entity>. A list of columns (composite key) is accepted by the schema so the validator can report it as not supported yet (ADR-008).",
-          "propertyNames": { "$ref": "#/$defs/id" },
+          "description": "Many-to-one joins: <target entity>: <foreign key>. The foreign key is a column or column expression of this entity (`left(PRDHA, 5)`), or a list with one per column of the target's key.",
+          "propertyNames": {
+            "$ref": "#/$defs/id"
+          },
           "additionalProperties": {
-            "type": ["string", "array"], "minLength": 1, "minItems": 2,
-            "items": { "type": "string", "minLength": 1 }
+            "type": [
+              "string",
+              "array"
+            ],
+            "minLength": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1
+          }
+        },
+        "rollups": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/id"
+          },
+          "description": "Per-row values added up from a child entity that joins this one, usable in this entity's aggregations.",
+          "additionalProperties": {
+            "$ref": "#/$defs/rollup"
           }
         },
         "dimensions": {
           "type": "object",
-          "propertyNames": { "$ref": "#/$defs/id" },
-          "additionalProperties": { "$ref": "#/$defs/dimension" }
+          "propertyNames": {
+            "$ref": "#/$defs/id"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/dimension"
+          }
         },
         "measures": {
           "type": "object",
-          "propertyNames": { "$ref": "#/$defs/id" },
-          "additionalProperties": { "$ref": "#/$defs/measure" }
+          "propertyNames": {
+            "$ref": "#/$defs/id"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/measure"
+          }
         }
       },
-      "required": ["table", "key"],
+      "required": [
+        "table",
+        "key"
+      ],
       "additionalProperties": false
     },
     "dimension": {
-      "type": ["object", "null"],
+      "type": [
+        "object",
+        "null"
+      ],
       "x-element": "dimension",
       "description": "An empty value means: column with the same name, type string, label from the name.",
       "properties": {
-        "label": { "type": "string" },
-        "description": { "type": "string" },
-        "column": { "type": "string", "minLength": 1 },
-        "type": { "enum": ["string", "number", "date", "boolean"], "default": "string" }
+        "label": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "column": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "enum": [
+            "string",
+            "number",
+            "date",
+            "boolean"
+          ],
+          "default": "string"
+        },
+        "fiscal": {
+          "$ref": "#/$defs/fiscal"
+        },
+        "lookup": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*\\.[A-Za-z_][A-Za-z0-9_]*$",
+          "description": "Take the value from another table: `<table>.<value column>` (ADR-009), e.g. a text table.",
+          "x-error": "must be `<table>.<value column>`, such as `t179t.VTEXT`"
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Key column of the lookup table."
+        },
+        "match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Expression on this entity's columns that equals the lookup key, e.g. `left(PRDHA, 5)`."
+        }
       },
       "additionalProperties": false
     },
     "measure": {
       "type": "object",
       "x-element": "measure",
-      "x-kind-keys": ["sum", "count", "count_distinct", "avg", "min", "max", "calc"],
+      "x-kind-keys": [
+        "sum",
+        "count",
+        "count_distinct",
+        "avg",
+        "min",
+        "max",
+        "calc"
+      ],
       "description": "Exactly one kind key: an aggregation over a SQL column expression, or `calc` over other measures.",
       "properties": {
-        "sum": { "$ref": "#/$defs/sql" },
-        "count": { "$ref": "#/$defs/sql" },
-        "count_distinct": { "$ref": "#/$defs/sql" },
-        "avg": { "$ref": "#/$defs/sql" },
-        "min": { "$ref": "#/$defs/sql" },
-        "max": { "$ref": "#/$defs/sql" },
-        "calc": { "$ref": "#/$defs/sql" },
-        "label": { "type": "string" },
-        "description": { "type": "string" },
-        "where": { "$ref": "#/$defs/sql" },
-        "grain": { "$ref": "#/$defs/refs" },
-        "format": { "enum": ["number", "integer", "currency", "percent"], "default": "number" }
+        "sum": {
+          "$ref": "#/$defs/sql"
+        },
+        "count": {
+          "$ref": "#/$defs/sql"
+        },
+        "count_distinct": {
+          "$ref": "#/$defs/sql"
+        },
+        "avg": {
+          "$ref": "#/$defs/sql"
+        },
+        "min": {
+          "$ref": "#/$defs/sql"
+        },
+        "max": {
+          "$ref": "#/$defs/sql"
+        },
+        "calc": {
+          "$ref": "#/$defs/sql"
+        },
+        "label": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "where": {
+          "$ref": "#/$defs/sql"
+        },
+        "grain": {
+          "$ref": "#/$defs/refs"
+        },
+        "date": {
+          "$ref": "#/$defs/ref",
+          "description": "Reach the calendar through this date dimension instead of the shortest join path."
+        },
+        "convert": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$",
+          "description": "Convert each row with the model's rates before aggregating.",
+          "x-error": "must be an ISO 4217 code such as `USD`"
+        },
+        "format": {
+          "enum": [
+            "number",
+            "integer",
+            "currency",
+            "percent"
+          ],
+          "default": "number"
+        }
       },
       "additionalProperties": false
     },
@@ -103,7 +255,10 @@
       "$ref": "#/$defs/refs",
       "minItems": 2
     },
-    "sql": { "type": "string", "minLength": 1 },
+    "sql": {
+      "type": "string",
+      "minLength": 1
+    },
     "id": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9_]*$",
@@ -119,6 +274,131 @@
       "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*){0,2}$",
       "x-error": "is not a field reference: use a name such as `region`, `date.month` or `customers.segment`"
     },
-    "refs": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/ref" } }
+    "refs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/ref"
+      }
+    },
+    "currency": {
+      "type": "object",
+      "x-element": "currency",
+      "description": "How amounts are converted (ADR-009): monthly rates from one table into one target currency.",
+      "properties": {
+        "target": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$",
+          "x-error": "must be an ISO 4217 code such as `USD`"
+        },
+        "rates": {
+          "$ref": "#/$defs/rates"
+        }
+      },
+      "required": [
+        "target",
+        "rates"
+      ],
+      "additionalProperties": false
+    },
+    "rates": {
+      "type": "object",
+      "description": "A table with one rate per currency and month: amount * rate = amount in the target currency.",
+      "properties": {
+        "table": {
+          "type": "string",
+          "minLength": 1
+        },
+        "currency": {
+          "type": "string",
+          "minLength": 1,
+          "description": "column with the source currency code"
+        },
+        "month": {
+          "type": "string",
+          "minLength": 1,
+          "description": "column with the first day of the month the rate is valid for"
+        },
+        "rate": {
+          "type": "string",
+          "minLength": 1,
+          "description": "column with the rate"
+        }
+      },
+      "required": [
+        "table",
+        "currency",
+        "month",
+        "rate"
+      ],
+      "additionalProperties": false
+    },
+    "entity_currency": {
+      "type": "object",
+      "description": "Money columns of this entity are in the currency named by dimension `code`, on the date in dimension `date`.",
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/ref"
+        },
+        "date": {
+          "$ref": "#/$defs/ref"
+        }
+      },
+      "required": [
+        "code",
+        "date"
+      ],
+      "additionalProperties": false
+    },
+    "fiscal": {
+      "type": "object",
+      "description": "Columns of this dimension's table that hold the fiscal year and period, enabling the grains fiscal_year and fiscal_period.",
+      "properties": {
+        "year": {
+          "type": "string",
+          "minLength": 1
+        },
+        "period": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "year",
+        "period"
+      ],
+      "additionalProperties": false
+    },
+    "rollup": {
+      "type": "object",
+      "x-element": "rollup",
+      "x-kind-keys": [
+        "sum",
+        "count",
+        "min",
+        "max"
+      ],
+      "properties": {
+        "sum": {
+          "$ref": "#/$defs/sql"
+        },
+        "count": {
+          "$ref": "#/$defs/sql"
+        },
+        "min": {
+          "$ref": "#/$defs/sql"
+        },
+        "max": {
+          "$ref": "#/$defs/sql"
+        },
+        "from": {
+          "$ref": "#/$defs/id"
+        }
+      },
+      "required": [
+        "from"
+      ],
+      "additionalProperties": false
+    }
   }
 }

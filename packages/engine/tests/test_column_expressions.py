@@ -66,6 +66,9 @@ FEATURE_CASES: dict[str, tuple[dict, str]] = {
     "coalesce": (
         {"sum": "coalesce(discount, 0) * quantity"},
         "SELECT SUM(COALESCE(o.discount, 0) * o.quantity) FROM order_lines o"),
+    "left": (
+        {"sum": "quantity", "where": "left(segment, 3) = 'Ent'"},
+        f"SELECT SUM(o.quantity) {JOINED} WHERE c.segment = 'Enterprise'"),
     "case": (
         {"sum": "case when discount > 0 then quantity else 0 end"},
         "SELECT SUM(CASE WHEN o.discount > 0 THEN o.quantity ELSE 0 END) FROM order_lines o"),

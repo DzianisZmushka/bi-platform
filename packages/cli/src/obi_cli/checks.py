@@ -40,10 +40,19 @@ def validate_all(root: str | Path, execute: bool = False) -> list[Issue]:
         doc = parse(path.read_text(encoding="utf-8"))
         model = doc.data["model"]
         try:
-            problems = project.engine(model).check_measures()
+            eng = project.engine(model)
+            problems = eng.check_measures()
+            rates = eng.check_rates()
+            lookups = eng.check_lookups()
         except EngineError as e:
             issues.append(Issue("error", rel, 1, f"model `{model}`", None, e.args[0]))
             continue
+        for entity, message in rates:
+            line = doc.line_of(("entities", entity, "currency"))
+            issues.append(Issue("error", rel, line, f"model `{model}`", f"entity `{entity}`", message))
+        for field, message in lookups:
+            line = doc.line_of(("entities", field.entity, "dimensions", field.name))
+            issues.append(Issue("error", rel, line, f"model `{model}`", f"dimension `{field.name}`", message))
         for field, message in problems:
             line = doc.line_of(("entities", field.entity, "measures", field.name))
             issues.append(Issue("error", rel, line, f"model `{model}`", f"measure `{field.name}`", message))

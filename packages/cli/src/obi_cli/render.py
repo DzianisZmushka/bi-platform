@@ -20,6 +20,7 @@ from markdown_it import MarkdownIt
 
 from obi_engine import EngineError, Filter, Project, SemanticQuery, humanize
 from obi_engine import dates
+from obi_formats.modelindex import FISCAL_GRAINS
 from obi_formats.artifacts import parse
 from obi_formats.expr import ExprError, FilterSelection, render as render_expr
 
@@ -87,6 +88,7 @@ class _Page:
         self.engine_filters: dict[str, Filter] = {}
         self.selections: dict[str, FilterSelection] = {}
         self.ranges: dict[str, tuple[date, date]] = {}
+        self.fiscal: set[str] = set()  # filters set to a fiscal preset
         for fid, f in self.filter_specs.items():
             self._prepare_filter(fid, f)
 
@@ -97,7 +99,11 @@ class _Page:
             self.selections[fid] = FilterSelection()
             return
         if ref.field.dtype == "date":
-            r = dates.resolve(values[0], self.as_of)
+            if values[0] in dates.FISCAL_PRESETS:  # from the calendar table (ADR-009)
+                r = self.eng.fiscal_range(f["dimension"], values[0], self.as_of)
+                self.fiscal.add(fid)
+            else:
+                r = dates.resolve(values[0], self.as_of)
             self.ranges[fid] = r
             self.engine_filters[fid] = Filter(f["dimension"], range=r)
             self.selections[fid] = FilterSelection([r[0].isoformat(), r[1].isoformat()],
@@ -341,7 +347,14 @@ def _compare_value(page: _Page, w: dict, page_id: str, m: str):
         return None
     fid = date_f[0]
     r = page.ranges[fid]
-    shifted = dates.shift_year(r) if w["compare"] == "previous_year" else dates.shift_period(r)
+    dim = page.filter_specs[fid]["dimension"]
+    if fid in page.fiscal:  # fiscal filter: compare by fiscal periods, from the calendar table
+        if w["compare"] == "previous_year":
+            shifted = page.eng.fiscal_shift_years(dim, r, -1)
+        else:
+            shifted = page.eng.fiscal_shift(dim, r, -page.eng.fiscal_periods_in(dim, r))
+    else:
+        shifted = dates.shift_year(r) if w["compare"] == "previous_year" else dates.shift_period(r)
     others = [page.engine_filters[f] for f in fids if f != fid]
     q = SemanticQuery([m], [], others + [Filter(page.filter_specs[fid]["dimension"], range=shifted)])
     rows = page.eng.query(q).to_pylist()
@@ -405,7 +418,7 @@ def _default_title(page: _Page, c: dict, x, ys) -> str:
     if not by:
         return ylab
     if _kind(page, by) != "measure" and _dim_ref(page, by).grain:
-        return f"{ylab} by {_dim_ref(page, by).grain}"   # "Net revenue by month"
+        return f"{ylab} by {_dim_ref(page, by).grain.replace('_', ' ')}"   # "by month", "by fiscal period"
     return f"{ylab} by {page.eng.label(by).lower()}"
 
 
@@ -467,6 +480,8 @@ def _axis(page: _Page, ref: str) -> dict:
         return {"field": name, "type": "quantitative", "title": page.eng.label(ref),
                 "axis": {"format": _d3(page, ref)}}
     r = _dim_ref(page, ref)
+    if r.grain in FISCAL_GRAINS:  # labels such as "FY2025 P07", already in order
+        return {"field": name, "type": "ordinal", "sort": None, "title": f"Fiscal {r.grain[7:]}"}
     if r.field.dtype == "date":
         return {"field": name, "type": "temporal", "timeUnit": TIME_UNITS[r.grain or "day"],
                 "title": page.eng.label(ref)}
@@ -609,12 +624,16 @@ def _name(page: _Page, ref: str) -> str:
 
 def _fmt_of(page: _Page, ref: str) -> str:
     r = page.eng.idx.resolve(ref)
-    return r.field.spec.get("format", "number") if r.field and r.kind == "measure" else "text"
+    if not (r.field and r.kind == "measure"):
+        return "text"
+    if page.eng.idx.per_currency(r.field):
+        return "amount"  # document currency: no currency symbol (ADR-009)
+    return r.field.spec.get("format", "number")
 
 
 def _d3(page: _Page, ref: str) -> str:
     fmt = _fmt_of(page, ref)
-    return {"percent": ".0%", "currency": "$~s", "integer": ",.0f"}.get(fmt, "~s")
+    return {"percent": ".0%", "currency": "$~s", "integer": ",.0f", "amount": ",.0f"}.get(fmt, "~s")
 
 
 def _format(page: _Page, v, fmt: str, compact: bool = False) -> str:
@@ -629,6 +648,8 @@ def _format(page: _Page, v, fmt: str, compact: bool = False) -> str:
         for div, suffix in ((1e9, "B"), (1e6, "M"), (1e3, "K")):
             if abs(v) >= div:
                 return f"{'-' if v < 0 else ''}{sym}{abs(v) / div:.1f}{suffix}"
+    if fmt == "amount":
+        return f"{v:,.2f}"
     if fmt in ("integer", "currency") or float(v).is_integer():
         return f"{'-' if v < 0 else ''}{sym}{abs(v):,.0f}"
     return f"{v:,.2f}"
@@ -690,10 +711,13 @@ def _filter_bar(page: _Page) -> str:
         ref = page.eng.idx.resolve(f["dimension"], ("dimension",))
         if ref.field.dtype == "date":
             current = page.inputs[fid][0] if page.inputs[fid] else ""
+            presets = list(dates.PRESETS)
+            if isinstance(ref.field.spec.get("fiscal"), dict):
+                presets = list(dates.FISCAL_PRESETS) + presets
             opts = ['<option value="">All dates</option>'] + [
-                f'<option value="{p}"{" selected" if p == current else ""}>{esc(dates.label(p, dates.resolve(p, page.as_of)))}</option>'
-                for p in dates.PRESETS]
-            if current and current not in dates.PRESETS:
+                f'<option value="{p}"{" selected" if p == current else ""}>{esc(p.replace("_", " ").capitalize())}</option>'
+                for p in presets]
+            if current and current not in presets:
                 opts.append(f'<option value="{esc(current)}" selected>{esc(current)}</option>')
             control = f'<select name="{esc(fid)}">{"".join(opts)}</select>'
         else:

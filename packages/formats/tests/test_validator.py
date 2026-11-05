@@ -23,11 +23,12 @@ def edit(rel: str, old: str, new: str) -> dict[str, str]:
 
 def messages(overrides: dict[str, str], file: str | None = None) -> list[str]:
     issues = validate_project(DEMO, overrides)
-    return [i.text for i in issues if file is None or i.file == file]
+    # Info lines (route notices) are tested separately; these lists hold errors and warnings.
+    return [i.text for i in issues if (file is None or i.file == file) and i.severity != "info"]
 
 
 def lines(overrides: dict[str, str]) -> list[int]:
-    return [i.line for i in validate_project(DEMO, overrides)]
+    return [i.line for i in validate_project(DEMO, overrides) if i.severity != "info"]
 
 
 def test_example_project_is_valid():
@@ -79,12 +80,20 @@ def test_model_measure_with_two_kinds():
 
 
 def test_model_two_join_paths():
+    # Two routes of the same length to `regions`: through customers and through products.
+    o = edit(MODEL, "    key: product_id\n", "    key: product_id\n    joins: { regions: brand }\n")
+    assert messages(o, MODEL) == [
+        "model `sales`, entity `order_lines`: reaches `regions` through two join paths of the same length: "
+        "order_lines → customers → regions and order_lines → products → regions; keep one (ADR-009)",
+        "model `sales`, entity `returns`: reaches `regions` through two join paths of the same length: "
+        "returns → order_lines → customers → regions and returns → order_lines → products → regions; "
+        "keep one (ADR-009)",
+    ]
+    # A shorter route is not ambiguous: the direct join wins (ADR-009).
     o = edit(MODEL, "joins: { calendar: order_date, customers: customer_id, products: product_id }",
              "joins: { calendar: order_date, customers: customer_id, products: product_id, "
              "regions: region_id }")
     assert messages(o, MODEL) == [
-        "model `sales`, entity `order_lines`: reaches `regions` through two join paths: "
-        "order_lines → customers → regions and order_lines → regions; keep exactly one (ADR-001)",
         "model `sales`, entity `order_lines`: column `region_id` not found in table `order_lines`",
     ]
 
@@ -251,11 +260,11 @@ def test_where_uses_dimensions_not_raw_columns():
 
 
 def test_where_dimension_must_be_reachable():
-    o = edit(MODEL, "      refunds: { sum: refund_amount, format: currency }",
-             "      refunds: { sum: refund_amount, where: segment = 'SMB', format: currency }")
+    o = edit(MODEL, "revenue_target: { sum: revenue_target,",
+             "revenue_target: { sum: revenue_target, where: segment = 'SMB',")
     assert messages(o, MODEL) == [
-        "model `sales`, measure `refunds`: `where`: dimension `segment` is not reachable from entity "
-        "`returns` through its joins",
+        "model `sales`, measure `revenue_target`: `where`: dimension `segment` is not reachable from entity "
+        "`targets` through its joins",
     ]
 
 
@@ -263,7 +272,7 @@ def test_unsupported_function_and_prefixed_aggregation():
     o = edit(MODEL, "where: year(signup_date) = year(date)", "where: upper(segment) = 'SMB'")
     assert messages(o, MODEL) == [
         "model `sales`, measure `new_customer_revenue`: `where`: function `upper` is not supported in column "
-        "expressions; use year, month, quarter, date_diff, coalesce, case, arithmetic, comparisons and "
+        "expressions; use year, month, quarter, date_diff, coalesce, left, case, arithmetic, comparisons and "
         "and/or/not",
     ]
     o = edit(MODEL, "units: { sum: quantity, format: integer }",
@@ -274,12 +283,12 @@ def test_unsupported_function_and_prefixed_aggregation():
     ]
 
 
-def test_composite_key_join_is_not_supported_yet():
-    o = edit(MODEL, "    joins: { calendar: return_date }",
-             "    joins:\n      calendar: return_date\n      order_lines: [order_id, line_no]")
+def test_composite_key_join():
+    # The example links returns to order lines on both key columns (ADR-009).
+    o = edit(MODEL, "      order_lines: [order_id, line_no]\n", "      order_lines: [order_id]\n")
     assert messages(o, MODEL) == [
-        "model `sales`, entity `returns`: joins on several columns (order_id, line_no) are not supported "
-        "yet; composite-key joins are planned for Phase 1 (ADR-008)",
+        "model `sales`, entity `returns`: the key of `order_lines` has 2 columns (order_id, line_no), but the "
+        "join gives 1; write `order_lines: [<column for order_id>, <column for line_no>]`",
     ]
 
 
@@ -304,4 +313,104 @@ def test_model_pasted_into_a_dashboard_file_gives_one_error():
     assert messages({OVERVIEW: model_text}) == [
         "dashboard `revenue-overview`: this file looks like a model, not a dashboard (it has `entities` or "
         "`hierarchies`); models live in `model/<id>.model.yaml`",
+    ]
+
+
+# --------------------------------------------------------------------------- erp-sales (ADR-009)
+
+ERP = ROOT / "examples" / "erp-sales"
+ERP_MODEL = "model/erp.model.yaml"
+O2C = "dashboards/order-to-cash/dashboard.yaml"
+
+
+def erp_messages(rel: str, old: str, new: str) -> list[str]:
+    text = (ERP / rel).read_text(encoding="utf-8")
+    assert text.count(old) == 1, old
+    return [i.text for i in validate_project(ERP, {rel: text.replace(old, new)}) if i.severity != "info"]
+
+
+def test_erp_example_is_valid():
+    assert [i.text for i in validate_project(ERP) if i.severity != "info"] == []
+
+
+def test_document_currency_cannot_be_added_across_currencies():
+    assert erp_messages(O2C, "            measure: order_value_usd\n            compare: previous_year\n          - kpi: billed",
+                        "            measure: order_value\n            compare: previous_year\n          - kpi: billed") == [
+        "dashboard `order-to-cash`, widget `ordered`: measure `order_value` is in document currency and cannot "
+        "be added up across currencies; a KPI shows one number, so use `order_value_usd`",
+    ]
+    assert erp_messages(O2C, "            x: order_value_usd\n            y: organisation\n            sort: -order_value_usd",
+                        "            x: order_value\n            y: organisation\n            sort: -order_value") == [
+        "dashboard `order-to-cash`, widget `org_orders`: measure `order_value` is in document currency and cannot "
+        "be added up across currencies; show `document_currency` in this widget (rows, columns or series), or "
+        "use `order_value_usd`",
+    ]
+
+
+def test_currency_conversion_errors():
+    assert erp_messages(ERP_MODEL, "cost_usd: { sum: WAVWR, convert: USD,", "cost_usd: { sum: WAVWR, convert: EUR,") == [
+        "model `erp`, measure `cost_usd`: `convert: EUR`: rates convert to `USD` only; use `convert: USD`",
+    ]
+    assert erp_messages(ERP_MODEL, "margin: { calc: order_value_usd - cost_usd,", "margin: { calc: order_value - cost_usd,") == [
+        "model `erp`, measure `margin`: mixes `cost_usd` (converted to USD) with `order_value` (document "
+        "currency); use converted measures throughout",
+    ]
+    assert erp_messages(ERP_MODEL, "    currency: { code: document_currency, date: order_date }\n    joins: { orders",
+                        "    currency: { code: document_currency, date: order_type }\n    joins: { orders") == [
+        "model `erp`, entity `order_items`: `currency.date`: `order_type` must be a date dimension, not string",
+    ]
+
+
+def test_lookup_rollup_and_date_route_errors():
+    assert erp_messages(ERP_MODEL, 'match: "left(PRDHA, 5)"', 'match: "left(materials.PRDHA, 5)"') == [
+        "model `erp`, dimension `product_line`: `match` uses `materials.PRDHA`: it reads columns of one table "
+        "only, without prefix",
+    ]
+    assert erp_messages(ERP_MODEL, "product_family: { lookup: t179t.VTEXT,", "product_family: { lookup: t179t.TEXT,") == [
+        "model `erp`, dimension `product_family`: column `TEXT` not found in lookup table `t179t`; "
+        "did you mean `VTEXT`?",
+    ]
+    assert erp_messages(ERP_MODEL, "billed_quantity: { sum: FKIMG, from: billing_items }",
+                        "billed_quantity: { sum: FKIMG, from: customers }") == [
+        "model `erp`, rollup `billed_quantity`: `from: customers`: `customers` must join `order_items` (a rollup "
+        "adds up the rows of `customers` that point to each `order_items` row)",
+    ]
+    assert erp_messages(ERP_MODEL, "billed_by_order_date_usd: { sum: NETWR, date: order_date,",
+                        "billed_by_order_date_usd: { sum: NETWR, date: billing_document,") == [
+        "model `erp`, measure `billed_by_order_date_usd`: `date`: dimension `billing_document` not found in model "
+        "`erp`; did you mean `billing_date`?",
+    ]
+
+
+def test_route_notice_names_the_chosen_path_and_changes_with_a_new_join():
+    def infos(overrides=None):
+        return [i.text for i in validate_project(ERP, overrides or {}) if i.severity == "info"]
+
+    assert infos() == [
+        "model `erp`, entity `billing_items`: reaches `calendar` by 2 routes; using the shortest, billing_items → "
+        "calendar (not billing_items → order_items → orders → calendar). A measure can choose another date route "
+        "with `date:`",
+    ]
+    # A direct join from billing items to order headers makes a new, shorter route to `orders` and
+    # everything behind it. The validator says so instead of switching silently.
+    text = (ERP / ERP_MODEL).read_text(encoding="utf-8")
+    changed = text.replace("      order_items: [AUBEL, AUPOS]\n", "      order_items: [AUBEL, AUPOS]\n      orders: AUBEL\n")
+    assert changed != text
+    after = infos({ERP_MODEL: changed})
+    assert ("model `erp`, entity `billing_items`: reaches `orders` by 2 routes; using the shortest, billing_items → "
+            "orders (not billing_items → order_items → orders). A measure can choose another date route with "
+            "`date:`") in after
+    assert len(after) > 1
+
+
+def test_fiscal_presets_and_grains_need_a_fiscal_calendar():
+    o = edit(OVERVIEW, "default: last_12_months", "default: this_fiscal_year")
+    assert messages(o) == [
+        "dashboard `revenue-overview`, filter `period`: `default: this_fiscal_year` needs a fiscal calendar on "
+        "dimension `date`; add `fiscal: { year: <column>, period: <column> }` to it in the model",
+    ]
+    o = edit(OVERVIEW, "            x: date.month", "            x: date.fiscal_period")
+    assert messages(o) == [
+        "dashboard `revenue-overview`, widget `revenue_trend`: `date.fiscal_period`: dimension `date` has no "
+        "fiscal calendar; add `fiscal: { year: <column>, period: <column> }` to it",
     ]

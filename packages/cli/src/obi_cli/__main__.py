@@ -29,6 +29,9 @@ def _validate(root: Path, execute: bool) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    for stream in (sys.stdout, sys.stderr):  # messages contain → and ▲; Windows consoles default to cp1252
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser(prog="obi", description="Open BI Platform command line (Phase 0).")
     sub = ap.add_subparsers(dest="cmd", required=True)
 

@@ -11,7 +11,7 @@ Plan per query:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import re
@@ -23,7 +23,7 @@ from sqlglot import exp
 
 from obi_formats.artifacts import parse
 from obi_formats.colexpr import ColExprError, parse as parse_colexpr, references
-from obi_formats.modelindex import MEASURE_KINDS, Field, ModelIndex, Ref, RefError
+from obi_formats.modelindex import FISCAL_GRAINS, MEASURE_KINDS, Field, ModelIndex, Ref, RefError
 
 AGG_SQL = {"sum": "SUM({})", "count": "COUNT({})", "count_distinct": "COUNT(DISTINCT {})",
            "avg": "AVG({})", "min": "MIN({})", "max": "MAX({})"}
@@ -34,11 +34,16 @@ DOUBLE_AGGS = ("sum", "avg")  # cast so integer columns do not come back as DECI
 # this engine, by the model index (joins, hierarchies) or by the validator (grain).
 # packages/cli/tests/test_coverage.py checks these against the schemas.
 HANDLED_MODEL: dict[str, set[str]] = {
-    "model": {"model", "title", "entities", "hierarchies"},
-    "entity": {"table", "key", "grain", "joins", "dimensions", "measures"},
-    "dimension": {"label", "column", "type"},
+    "model": {"model", "title", "currency", "entities", "hierarchies"},
+    "currency": {"target", "rates"},
+    "rates": {"table", "currency", "month", "rate"},
+    "entity": {"table", "key", "grain", "currency", "joins", "rollups", "dimensions", "measures"},
+    "rollup": {"sum", "count", "min", "max", "from"},
+    "entity_currency": {"code", "date"},
+    "dimension": {"label", "column", "type", "fiscal", "lookup", "key", "match"},
+    "fiscal": {"year", "period"},
     "measure": {"sum", "count", "count_distinct", "avg", "min", "max", "calc", "label", "where", "grain",
-                "format"},
+                "date", "convert", "format"},
 }
 HANDLED_PROJECT: dict[str, set[str]] = {
     "project": {"project", "title", "description", "default_connection", "currency", "connections"},
@@ -148,6 +153,14 @@ class Engine:
     def distinct(self, dimension: str, limit: int = 500) -> list:
         ref = self._dim(dimension)
         e = self.idx.entities[ref.field.entity]
+        lk = self.idx.lookup(ref.field)
+        if lk:
+            table, value, key, match = lk
+            col = f"l.{_q(value)}"
+            sql = (f"SELECT DISTINCT {col} AS v FROM {_q(e['table'])} AS t JOIN {_q(table)} AS l "
+                   f"ON l.{_q(key)} = {_qualify(parse_colexpr(match), 't')} WHERE {col} IS NOT NULL "
+                   f"ORDER BY 1 LIMIT {limit}")
+            return [r[0] for r in self.con.sql(sql).fetchall()]
         col = f"t.{_q(self._column(ref.field))}"
         sql = (f"SELECT DISTINCT {col} AS v FROM {_q(e['table'])} AS t WHERE {col} IS NOT NULL "
                f"ORDER BY 1 LIMIT {limit}")
@@ -193,10 +206,11 @@ class Engine:
             ref = self._resolve(m, ("measure",))
             outputs.append((ref.field.name, self._measure_expr(ref.field, base, ())))
 
-        by_fact: dict[str, list[Field]] = {}
-        for f in base:
-            by_fact.setdefault(f.entity, []).append(f)
-        ctes = [self._fact_cte(fact, ms, base, dims, names, filters) for fact, ms in by_fact.items()]
+        by_fact: dict[tuple, list[Field]] = {}
+        for f in base:  # measures with their own date route get their own query (ADR-009)
+            by_fact.setdefault((f.entity, self.idx.date_route(f)), []).append(f)
+        ctes = [self._fact_cte(fact, ms, base, dims, names, filters, route)
+                for (fact, route), ms in by_fact.items()]
 
         cte_names = [f"f{i}" for i in range(len(ctes))]
         sql = "WITH " + ", ".join(f"{n} AS ({c})" for n, c in zip(cte_names, ctes)) + " "
@@ -249,44 +263,72 @@ class Engine:
         return rewrite(_checked(f.spec["calc"], f, "calc")).sql("duckdb")
 
     def _fact_cte(self, fact: str, measures: list[Field], base: dict, dims: list[Ref],
-                  names: list[str], filters: list) -> str:
+                  names: list[str], filters: list, route: tuple[str, str] | None = None) -> str:
         aliases = {fact: "t0"}
         joins: list[str] = []
+        lookups: dict[tuple[str, str], str] = {}
 
         def alias_of(entity: str, why: str) -> str:
             if entity in aliases:
                 return aliases[entity]
-            path = self._path(fact, entity)
+            path = self.idx.path(fact, entity)
+            if route and entity == route[1]:  # `date: <dimension>` on the measure
+                via = self.idx.path(fact, route[0])
+                path = None if via is None else via + self.idx.path(route[0], entity)
             if path is None:
                 raise EngineError(f"{why} cannot be reached from entity `{fact}`; check the measure's grain")
             for src, dst, fk in path:
                 if dst not in aliases:
                     aliases[dst] = f"t{len(aliases)}"
-                    key = self.idx.entities[dst]["key"]
-                    key = key[0] if isinstance(key, list) else key
-                    joins.append(f"LEFT JOIN {_q(self.idx.entities[dst]['table'])} AS {aliases[dst]} "
-                                 f"ON {aliases[src]}.{_q(fk)} = {aliases[dst]}.{_q(key)}")
+                    fks = fk if isinstance(fk, list) else [fk]
+                    on = " AND ".join(
+                        f"{_qualify(_checked_join(x, src, dst), aliases[src])} = {aliases[dst]}.{_q(k)}"
+                        for x, k in zip(fks, self.idx.key_columns(dst)))
+                    joins.append(f"LEFT JOIN {_q(self.idx.entities[dst]['table'])} AS {aliases[dst]} ON {on}")
             return aliases[entity]
+
+        def dim_sql(d: Ref, why: str) -> str:
+            alias = alias_of(d.field.entity, why)
+            lk = self.idx.lookup(d.field)
+            if lk:  # lookup dimension: one join to the lookup table per dimension (ADR-009)
+                table, value, key, match = lk
+                k = (alias, d.field.name)
+                if k not in lookups:
+                    lookups[k] = f"lk{len(lookups)}"
+                    on = _qualify(parse_colexpr(match), alias)
+                    joins.append(f"LEFT JOIN {_q(table)} AS {lookups[k]} ON {lookups[k]}.{_q(key)} = {on}")
+                return f"{lookups[k]}.{_q(value)}"
+            col = f"{alias}.{_q(self._column(d.field))}"
+            if d.grain in FISCAL_GRAINS:  # read from the calendar table, never computed (ADR-009)
+                fiscal = d.field.spec["fiscal"]
+                year = f"CAST({alias}.{_q(fiscal['year'])} AS VARCHAR)"
+                if d.grain == "fiscal_year":
+                    return f"'FY' || {year}"
+                return f"'FY' || {year} || ' P' || lpad(CAST({alias}.{_q(fiscal['period'])} AS VARCHAR), 2, '0')"
+            if d.grain and d.grain != "day":
+                return f"CAST(date_trunc('{d.grain}', {col}) AS DATE)"
+            return col
 
         select = []
         for name, d in zip(names, dims):
-            col = f"{alias_of(d.field.entity, f'dimension `{d.text}`')}.{_q(self._column(d.field))}"
-            if d.grain and d.grain != "day":
-                col = f"CAST(date_trunc('{d.grain}', {col}) AS DATE)"
-            select.append(f"{col} AS {_q(name)}")
+            select.append(f"{dim_sql(d, f'dimension `{d.text}`')} AS {_q(name)}")
+        rate = self._rate_join(fact, measures, dim_sql, joins)
+        rollup_sql = self._rollup_joins(fact, measures, joins)
         for m in measures:
             kind = next(k for k in MEASURE_KINDS if k in m.spec)
-            expr = _qualify(_checked(m.spec[kind], m, kind), "t0")
+            expr = _qualify(_checked(m.spec[kind], m, kind), "t0", rollup_sql)
+            if self.idx.converts(m):
+                expr = f"({expr}) * {rate}"
             agg = AGG_SQL[kind].format(expr)
             if m.spec.get("where"):
-                agg += f" FILTER (WHERE {self._where_sql(m, alias_of)})"
+                agg += f" FILTER (WHERE {self._where_sql(m, dim_sql)})"
             if kind in DOUBLE_AGGS:
                 agg = f"CAST({agg} AS DOUBLE)"
             select.append(f"{agg} AS {_q(base[m])}")
 
         where = []
         for d, f in filters:
-            col = f"{alias_of(d.field.entity, f'filter on `{f.dimension}`')}.{_q(self._column(d.field))}"
+            col = dim_sql(Ref(d.text, field=d.field), f"filter on `{f.dimension}`")
             if f.range:
                 where.append(f"{col} BETWEEN {_lit(f.range[0])} AND {_lit(f.range[1])}")
             elif f.values is not None:
@@ -302,32 +344,179 @@ class Engine:
             sql += " GROUP BY " + ", ".join(str(i + 1) for i in range(len(dims)))
         return sql
 
-    def _where_sql(self, m: Field, alias_of) -> str:
+    def _rate_join(self, fact: str, measures: list[Field], dim_sql, joins: list[str]) -> str | None:
+        """One join to the rate table per fact query, on the row's currency and month (ADR-009)."""
+        if not any(self.idx.converts(m) for m in measures):
+            return None
+        cur = self.idx.entities[fact].get("currency") or {}
+        rates = self.idx.currency.get("rates") or {}
+        code = dim_sql(self._resolve(cur["code"], ("dimension",)), f"currency code `{cur['code']}`")
+        day = dim_sql(self._resolve(cur["date"], ("dimension",)), f"currency date `{cur['date']}`")
+        joins.append(f"LEFT JOIN {_q(rates['table'])} AS fx ON fx.{_q(rates['currency'])} = {code} "
+                     f"AND fx.{_q(rates['month'])} = CAST(date_trunc('month', {day}) AS DATE)")
+        return f"fx.{_q(rates['rate'])}"
+
+    def check_rates(self) -> list[tuple[str, str]]:
+        """Rows whose currency and month have no rate: converted sums would silently miss them.
+        Grouped by currency and day, a converted total is empty exactly when its rate is missing."""
+        problems = []
+        for en, e in self.idx.entities.items():
+            converted = [f for f in self.idx.fields(en) if self.idx.converts(f)]
+            cur = e.get("currency")
+            if not converted or not isinstance(cur, dict):
+                continue
+            m = converted[0]
+            code, day = (self._resolve(cur[k], ("dimension",)).field.name for k in ("code", "date"))
+            inner = self.sql(SemanticQuery([m.qualified], [cur["code"], cur["date"]]))
+            check = (f"SELECT {_q(code)}, CAST(date_trunc('month', {_q(day)}) AS DATE) FROM ({inner}) "
+                     f"WHERE {_q(m.name)} IS NULL GROUP BY 1, 2 ORDER BY 1, 2")
+            try:
+                rows = self.con.sql(check).fetchall()
+            except duckdb.Error as err:
+                problems.append((en, translate_db_error(err)))
+                continue
+            if rows:
+                months = ", ".join(f"{c} {mo:%Y-%m}" for c, mo in rows[:5])
+                more = f" and {len(rows) - 5} more" if len(rows) > 5 else ""
+                problems.append((en, f"no exchange rate for {months}{more}; converted amounts would leave "
+                                     f"those rows out"))
+        return problems
+
+    def fiscal_range(self, dimension: str, preset: str, as_of: date) -> tuple[date, date]:
+        """A fiscal preset as a date range, read from the calendar table (ADR-009)."""
+        d, alias_sql = self._fiscal_dim(dimension)
+        y, pcol, col = alias_sql
+        row = self.con.sql(f"SELECT {y}, {pcol} FROM {d} WHERE {col} = {_lit(as_of)}").fetchall()
+        if not row:
+            raise EngineError(f"the calendar has no row for {as_of.isoformat()}")
+        fy, fp = row[0]
+        where = {"this_fiscal_year": f"{y} = {fy}", "last_fiscal_year": f"{y} = {fy - 1}",
+                 "fiscal_year_to_date": f"{y} = {fy} AND {col} <= {_lit(as_of)}",
+                 "this_fiscal_period": f"{y} = {fy} AND {pcol} = {fp}"}.get(preset)
+        if preset == "last_fiscal_period":
+            prev = self.con.sql(f"SELECT {y}, {pcol} FROM {d} WHERE ({y} * 100 + {pcol}) < {fy * 100 + fp} "
+                                f"ORDER BY {y} DESC, {pcol} DESC LIMIT 1").fetchall()
+            if not prev:
+                raise EngineError("the calendar has no earlier fiscal period")
+            where = f"{y} = {prev[0][0]} AND {pcol} = {prev[0][1]}"
+        if where is None:
+            raise EngineError(f"`{preset}` is not a fiscal preset")
+        lo, hi = self.con.sql(f"SELECT MIN({col}), MAX({col}) FROM {d} WHERE {where}").fetchall()[0]
+        return lo, hi
+
+    def fiscal_shift(self, dimension: str, r: tuple[date, date], periods: int) -> tuple[date, date]:
+        """Move a range by whole fiscal periods using the calendar table: each end keeps its
+        offset inside its period. `periods=-12` is the same span one fiscal year earlier when
+        the year has twelve periods; the calendar decides, nothing is computed from dates."""
+        d, (y, pcol, col) = self._fiscal_dim(dimension)
+        periods_sql = (f"SELECT {y} AS y, {pcol} AS p, MIN({col}) AS s, MAX({col}) AS e, "
+                       f"ROW_NUMBER() OVER (ORDER BY {y}, {pcol}) AS i FROM {d} GROUP BY 1, 2")
+        out = []
+        for day in r:
+            row = self.con.sql(f"WITH ps AS ({periods_sql}) SELECT ps.i, {_lit(day)} - ps.s FROM ps "
+                               f"WHERE {_lit(day)} BETWEEN ps.s AND ps.e").fetchall()
+            if not row:
+                raise EngineError(f"the calendar has no fiscal period for {day.isoformat()}")
+            i, offset = row[0]
+            target = self.con.sql(f"WITH ps AS ({periods_sql}) SELECT s, e FROM ps WHERE i = {i + periods}").fetchall()
+            if not target:
+                raise EngineError("the calendar does not reach back far enough for this comparison")
+            s, e = target[0]
+            out.append(min(s + timedelta(days=offset), e))
+        return out[0], out[1]
+
+    def fiscal_periods_in(self, dimension: str, r: tuple[date, date]) -> int:
+        d, (y, pcol, col) = self._fiscal_dim(dimension)
+        row = self.con.sql(f"SELECT COUNT(DISTINCT ({y}, {pcol})) FROM {d} WHERE {col} BETWEEN "
+                           f"{_lit(r[0])} AND {_lit(r[1])}").fetchall()
+        return int(row[0][0] or 1)
+
+    def fiscal_shift_years(self, dimension: str, r: tuple[date, date], years: int) -> tuple[date, date]:
+        """The same fiscal periods `years` fiscal years away, read from the calendar table: each end
+        keeps its fiscal period and its offset inside that period. Works for any fiscal calendar
+        (4-4-5, 53-week years) and for a calendar table that ends mid-year."""
+        d, (y, pcol, col) = self._fiscal_dim(dimension)
+        out = []
+        for day in r:
+            row = self.con.sql(f"SELECT {y}, {pcol}, {_lit(day)} - MIN({col}) OVER (PARTITION BY {y}, {pcol}) "
+                               f"FROM {d} QUALIFY {col} = {_lit(day)}").fetchall()
+            if not row:
+                raise EngineError(f"the calendar has no fiscal period for {day.isoformat()}")
+            fy, fp, offset = row[0]
+            target = self.con.sql(f"SELECT MIN({col}), MAX({col}) FROM {d} WHERE {y} = {fy + years} "
+                                  f"AND {pcol} = {fp}").fetchall()[0]
+            if target[0] is None:
+                raise EngineError(f"the calendar has no fiscal year {fy + years}, period {fp}")
+            out.append(min(target[0] + timedelta(days=offset), target[1]))
+        return out[0], out[1]
+
+    def _fiscal_dim(self, dimension: str):
+        r = self._resolve(dimension.split(".")[0] if dimension.count(".") == 1 and
+                          dimension.split(".")[1] in FISCAL_GRAINS else dimension, ("dimension",))
+        fiscal = r.field.spec.get("fiscal")
+        if not isinstance(fiscal, dict):
+            raise EngineError(f"dimension `{r.field.name}` has no fiscal calendar")
+        table = _q(self.idx.entities[r.field.entity]["table"])
+        return table, (_q(fiscal["year"]), _q(fiscal["period"]), _q(self._column(r.field)))
+
+    def _rollup_joins(self, fact: str, measures: list[Field], joins: list[str]) -> dict[str, str]:
+        """Rollups used by these measures: each child entity's rows added up per row of the fact,
+        joined on the child's foreign key. Returns rollup name -> SQL for the value (ADR-009)."""
+        out: dict[str, str] = {}
+        rollups = self.idx.rollups(fact)
+        used = {r for m in measures for k in MEASURE_KINDS if isinstance(m.spec.get(k), str)
+                for r, _ in references(parse_colexpr(m.spec[k])) if r in rollups}
+        for i, name in enumerate(sorted(used)):
+            spec = rollups[name]
+            kind = self.idx.rollup_kind(spec)
+            child = spec["from"]
+            fk = self.idx.joins(child)[fact]
+            fks = fk if isinstance(fk, list) else [fk]
+            keys = self.idx.key_columns(fact)
+            body = _qualify(parse_colexpr(spec[kind]), "c")
+            cols = ", ".join(f"{_qualify(parse_colexpr(x), 'c')} AS k{j}" for j, x in enumerate(fks))
+            alias = f"ru{i}"
+            joins.append(f"LEFT JOIN (SELECT {cols}, {AGG_SQL[kind].format(body)} AS v "
+                         f"FROM {_q(self.idx.entities[child]['table'])} AS c GROUP BY ALL) AS {alias} ON "
+                         + " AND ".join(f"{alias}.k{j} = t0.{_q(k)}" for j, k in enumerate(keys)))
+            out[name] = f"COALESCE({alias}.v, 0)" if kind in ("sum", "count") else f"{alias}.v"
+        return out
+
+    def check_lookups(self) -> list[tuple[Field, str]]:
+        """A lookup key that is not unique would multiply rows (SAP text tables are keyed by
+        code and language, for example)."""
+        problems = []
+        seen = set()
+        for f in self.idx.fields():
+            lk = self.idx.lookup(f)
+            if not lk or lk[:3:2] in seen:
+                continue
+            seen.add(lk[:3:2])
+            table, _, key, _ = lk
+            rows = self.con.sql(f"SELECT {_q(key)}, COUNT(*) FROM {_q(table)} GROUP BY 1 HAVING COUNT(*) > 1 "
+                                f"ORDER BY 1 LIMIT 3").fetchall()
+            if rows:
+                examples = ", ".join(f"`{k}` ({n} rows)" for k, n in rows)
+                problems.append((f, f"lookup key `{key}` is not unique in table `{table}`: {examples}; "
+                                    f"a lookup must find at most one row"))
+        return problems
+
+    def _where_sql(self, m: Field, dim_sql) -> str:
         """`where:` names model dimensions (ADR-008): each is resolved and joined like a
         chart axis, so a filtered measure can use attributes of joined entities."""
         tree = _checked(m.spec["where"], m, "where")
         for text, col in references(tree):
             r = self._resolve(text, ("dimension",))
-            sql = f"{alias_of(r.field.entity, f'dimension `{text}` in the `where` of measure `{m.name}`')}" \
-                  f".{_q(self._column(r.field))}"
-            if r.grain and r.grain != "day":
-                sql = f"CAST(date_trunc('{r.grain}', {sql}) AS DATE)"
+            sql = dim_sql(r, f"dimension `{text}` in the `where` of measure `{m.name}`")
             col.replace(sqlglot.parse_one(sql, read="duckdb"))
         return tree.sql("duckdb")
 
-    def _path(self, start: str, target: str):
-        """The single join path from `start` to `target` (ADR-001), as (src, dst, fk) steps."""
-        todo = [(start, [])]
-        seen = {start}
-        while todo:
-            ent, path = todo.pop(0)
-            if ent == target:
-                return path
-            for dst, fk in self.idx.joins(ent).items():
-                if dst not in seen:
-                    seen.add(dst)
-                    todo.append((dst, path + [(ent, dst, fk)]))
-        return None
+
+def _checked_join(text, src: str, dst: str) -> exp.Expression:
+    try:
+        return parse_colexpr(str(text))
+    except ColExprError as e:
+        raise EngineError(f"join from `{src}` to `{dst}`: {e.message}") from None
 
 
 def _checked(text: str, m: Field, key: str) -> exp.Expression:
@@ -362,8 +551,14 @@ def translate_db_error(e: Exception) -> str:
     return "the database could not compute this; run `obi validate` for details"
 
 
-def _qualify(tree: exp.Expression, alias: str) -> str:
-    for col in tree.find_all(exp.Column):
+def _qualify(tree: exp.Expression, alias: str, replace: dict[str, str] | None = None) -> str:
+    """Prefix bare column names with `alias`; names in `replace` (rollups) become that SQL."""
+    if replace and isinstance(tree, exp.Column) and not tree.table and tree.name in replace:
+        return replace[tree.name]  # the whole body is one rollup
+    for col in list(tree.find_all(exp.Column)):
+        if replace and not col.table and col.name in replace:
+            col.replace(sqlglot.parse_one(replace[col.name], read="duckdb"))
+            continue
         if not col.table:
             col.set("table", exp.to_identifier(alias))
     return tree.sql("duckdb")
@@ -377,6 +572,12 @@ def _output_names(dims: list[Ref]) -> list[str]:
     return names
 
 
+_CODES = {"usd", "eur", "gbp", "jpy", "chf", "cny", "aed", "inr", "cad", "aud"}
+
+
 def humanize(name: str) -> str:
-    s = name.replace("_", " ")
+    """Default label from an id (ADR-002 §5): `net_revenue` -> "Net revenue",
+    `order_value_usd` -> "Order value USD", `margin_pct` -> "Margin %"."""
+    words = ["%" if w == "pct" else w.upper() if w in _CODES else w for w in name.split("_")]
+    s = " ".join(words)
     return s[:1].upper() + s[1:]

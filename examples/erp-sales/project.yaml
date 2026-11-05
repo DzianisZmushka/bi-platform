@@ -1,0 +1,20 @@
+project: erp-sales
+title: ERP sales
+description: SAP-style order-to-cash data with composite keys, three currencies and a fiscal year from April.
+default_connection: local
+currency: USD
+
+connections:
+  local:
+    duckdb:
+    tables:
+      vbak: data/vbak.csv
+      vbap: data/vbap.csv
+      vbrp: data/vbrp.csv
+      kna1: data/kna1.csv
+      tvko: data/tvko.csv
+      t001: data/t001.csv
+      mara: data/mara.csv
+      t179t: data/t179t.csv
+      tcurr: data/tcurr.csv
+      calendar: data/calendar.csv

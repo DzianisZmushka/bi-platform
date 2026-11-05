@@ -286,3 +286,33 @@ entities:
     out = canon(src, "model")
     assert "    joins:\n      # composite key, not supported yet\n" \
            "      order_lines: [order_id, line_no]  # VBELN + POSNR style\n" in out
+
+
+@pytest.mark.parametrize("before, line", [
+    ("currency:\n", "currency:  # c\n"),
+    ("  target: USD\n", "  target: USD  # c\n"),
+    ("  rates: { table: tcurr, currency: FCURR, month: GDATU, rate: UKURS }\n",
+     "  rates: { table: tcurr, currency: FCURR, month: GDATU, rate: UKURS }  # c\n"),
+    ("    currency: { code: document_currency, date: order_date }\n",
+     "    currency: { code: document_currency, date: order_date }  # c\n"),
+    ('      product_line: { lookup: t179t.VTEXT, key: PRODH, match: "left(PRDHA, 5)" }\n',
+     '      product_line: { lookup: t179t.VTEXT, key: PRODH, match: "left(PRDHA, 5)" }  # c\n'),
+    ("      billed_quantity: { sum: FKIMG, from: billing_items }\n",
+     "      billed_quantity: { sum: FKIMG, from: billing_items }  # c\n"),
+    ("      billed_by_order_date_usd: { sum: NETWR, date: order_date, convert: USD, format: currency }\n",
+     "      billed_by_order_date_usd: { sum: NETWR, date: order_date, convert: USD, format: currency }  # c\n"),
+    ("      order_value_usd: { sum: NETWR, convert: USD, format: currency }\n",
+     "      order_value_usd: { sum: NETWR, convert: USD, format: currency }  # c\n"),
+    ("        fiscal: { year: FISCAL_YEAR, period: FISCAL_PERIOD }\n",
+     "        fiscal: { year: FISCAL_YEAR, period: FISCAL_PERIOD }  # c\n"),
+])
+def test_comments_on_erp_properties(before, line):
+    """CLAUDE.md: each new property (currency, rates, entity currency, expression join, convert,
+    fiscal) keeps a full-line comment above it and a trailing comment on its line."""
+    path = ROOT / "examples/erp-sales/model/erp.model.yaml"
+    text = path.read_text(encoding="utf-8")
+    assert before in text
+    indent = before[:len(before) - len(before.lstrip())]
+    commented = text.replace(before, f"{indent}# above\n{line}", 1)  # first occurrence
+    out = canon(commented, "model")
+    assert f"{indent}# above\n{line}" in out

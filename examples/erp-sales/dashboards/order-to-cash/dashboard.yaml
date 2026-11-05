@@ -1,0 +1,130 @@
+dashboard: order-to-cash
+title: Order to cash
+description: Orders against billing by fiscal period, by organisation and product, and the open order book.
+model: erp
+
+filters:
+  - filter: period
+    dimension: date
+    default: fiscal_year_to_date
+  - filter: sales_org
+    dimension: sales_org
+  - filter: country
+    dimension: country
+
+pages:
+  - page: orders_billing
+    title: Orders vs billing
+    items:
+      - row: headline
+        items:
+          - kpi: ordered
+            measure: order_value_usd
+            compare: previous_year
+          - kpi: billed
+            measure: billed_value_usd
+            compare: previous_year
+          - kpi: billed_share
+            measure: billed_pct
+            color: "${value < 0.85 ? 'warning' : 'ok'}"
+          - kpi: margin_rate
+            measure: margin_pct
+            compare: previous_year
+          - kpi: orders
+            measure: order_count
+            compare: previous_year
+          - kpi: rejections
+            measure: rejection_rate
+            color: "${value > 0.3 ? 'danger' : value > 0.2 ? 'warning' : 'ok'}"
+      - grid: trend
+        columns: [2, 1]
+        items:
+          - chart: ordered_vs_billed
+            title: Ordered vs billed by fiscal period
+            mark: line
+            x: date.fiscal_period
+            y: [order_value_usd, billed_value_usd]
+          - table: by_currency
+            title: Orders by document currency
+            rows: [document_currency]
+            values: [order_value, order_value_usd, order_count]
+            sort: -order_value_usd
+      - table: by_period
+        title: Fiscal periods
+        description: Billed is counted in the period of the bill; billed for orders, in the period of the order.
+        rows: [date.fiscal_period]
+        values:
+          - order_value_usd
+          - billed_value_usd
+          - billed_by_order_date_usd
+          - billed_pct
+          - return_value_usd
+          - margin_pct
+        totals: true
+        cells:
+          billed_pct: { color: "${value < 0.85 ? 'warning' : 'ok'}" }
+          margin_pct: { color: "${value < 0.3 ? 'danger' : 'ok'}" }
+
+  - page: org_product
+    title: Organisation and product
+    items:
+      - grid: drill
+        columns: [1, 1]
+        items:
+          - chart: org_orders
+            title: Order value by organisation (click to drill down)
+            mark: bar
+            x: order_value_usd
+            y: organisation
+            sort: -order_value_usd
+          - chart: product_margin
+            title: Margin by product (click to drill down)
+            mark: bar
+            x: margin
+            y: product
+            sort: -margin
+      - table: product_table
+        title: Product hierarchy
+        rows: [product]
+        values: [order_value_usd, cost_usd, margin, margin_pct, item_count, rejection_rate]
+        sort: -order_value_usd
+        totals: true
+        cells:
+          order_value_usd: { bar: true }
+          margin_pct: { color: "${value < 0.3 ? 'danger' : value < 0.4 ? 'warning' : 'ok'}" }
+      - chart: country_orders
+        mark: bar
+        x: geography
+        y: order_value_usd
+        sort: -order_value_usd
+
+  - page: open_orders
+    title: Open orders
+    description: Billable order items not yet billed, across all dates. The period filter does not apply here.
+    items:
+      - row: open_kpis
+        items:
+          - kpi: open_value
+            measure: open_order_value_usd
+            ignore_filters: [period]
+          - kpi: open_billable
+            measure: billable_value_usd
+            ignore_filters: [period]
+          - kpi: open_billed_share
+            measure: billed_pct
+            ignore_filters: [period]
+      - chart: open_by_org
+        mark: bar
+        x: open_order_value_usd
+        y: sales_org
+        ignore_filters: [period]
+        sort: -open_order_value_usd
+      - table: open_items
+        title: Largest open order items
+        rows: [sales_order, item, order_date, customer, material]
+        values: [billable_value_usd, billed_value_usd, open_order_value_usd]
+        ignore_filters: [period]
+        sort: -open_order_value_usd
+        limit: 50
+        cells:
+          open_order_value_usd: { bar: true }
