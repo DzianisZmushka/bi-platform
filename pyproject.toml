@@ -1,0 +1,20 @@
+[project]
+name = "obi-workspace"
+version = "0.0.0"
+description = "Open BI Platform (working name) — monorepo root"
+requires-python = ">=3.12,<3.13"
+dependencies = ["obi-formats", "obi-engine", "obi-cli"]
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["packages/formats", "packages/engine", "packages/cli"]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.uv.sources]
+obi-formats = { workspace = true }
+obi-engine = { workspace = true }
+obi-cli = { workspace = true }

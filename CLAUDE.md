@@ -1,0 +1,109 @@
+# Project: Open BI Platform (working name — TBD)
+
+## What we are building
+
+A web-based data platform where **every artifact is a text file in a Git repository**, and every artifact can be edited in two equivalent ways: a visual builder for business users, and plain code for developers and LLMs. The two are strict projections of the same file — nothing exists in the builder that is not in the file, and nothing in the file is hidden from the builder.
+
+The platform contains **no AI inside the product**. The design goal is that a user can download any artifact (or the whole project) as readable text, hand it to any LLM ("here is the code, return the code"), upload the result, and see it work. Everything an LLM needs is a public, compact, human-readable format with a published schema.
+
+Artifact types (in priority order):
+1. **Semantic models** — measures, dimensions, hierarchies, relations, row-level security.
+2. **Dashboards** — web-app-grade layouts (not a 12-column grid), widgets bound to model measures/dimensions, cross-filtering, navigation, actions.
+3. **Input forms & master-data forms** — write-back into ordinary SQL tables declared as writable in the model. Not tied to planning.
+4. **Scheduled Excel reports** — cell-level bindings of model queries into Excel templates, generated on schedule, bursted to user groups.
+5. **Pipelines (ETL)** — DAG of SQL/Python steps; step bodies are code only, the DAG is declarative.
+6. **Roles & permissions** — declarative RBAC + row-level rules in code.
+
+## Non-negotiable principles
+
+- **File is the source of truth.** The runtime is a materialized index of a Git branch, never the other way around. Builder saves == Git commit.
+- **Round-trip is lossless and canonical.** One state → exactly one serialization. Open-and-save in the builder must produce zero diff. Fixed key order, defaults never serialized, stable ordering of collections.
+- **Compact and readable.** A serious dashboard with ~40 widgets should be a few hundred lines of YAML, not thousands. No GUIDs, no pixel coordinates, no inline SQL, no inline styles — use human-readable ids, semantic layout, model references and theme references.
+- **Whole-artifact editing.** The unit of exchange with an LLM is an entire artifact or project folder, not a widget. Keep formats small enough for that.
+- **Validator with human-readable errors.** On upload/deploy, errors must name the artifact, the element id, and the fix (e.g. "dashboard `revenue-overview`, widget `revenue_trend`: measure `net_rev` not found in model `sales`; did you mean `net_revenue`?").
+- **Format before builder.** Every subsystem first exists as format + runtime (code-only). A visual builder is added only once the format has stabilized.
+- **Buy, don't build, for commodity.** SQL execution → warehouse. ETL sources → `dlt`. SQL transforms → dbt-compatible runner. Dialect translation → `sqlglot`. Chart grammar → Vega-Lite-inspired subset. Semantic query engine: evaluate Cube before writing our own.
+- **Never in Git:** users, passwords, connection secrets, form data, run logs, delivery history. Only rules, mappings and schemas.
+
+## Repository layout of a user project (the thing we render)
+
+```
+project/
+  project.yaml               # name, default connection, environments
+  model/
+    <name>.model.yaml        # entities, measures, dimensions, hierarchies, relations, RLS, writable entities
+  dashboards/
+    <id>/
+      dashboard.yaml         # pages, layout tree, widgets, interactions
+      filters.yaml           # global filters and bindings (optional, may be inlined)
+  forms/
+    <id>.form.yaml           # fields, validation, target writable entity, workflow (draft/submitted/approved)
+  reports/
+    <id>/
+      report.yaml            # bindings: cell/range → model query, layout direction, formatting
+      template.xlsx          # optional binary template (Git LFS); textual representation preferred
+      schedule.yaml          # cron, recipients (groups), channel, bursting filter
+  pipelines/
+    <id>/
+      pipeline.yaml          # DAG: steps, dependencies, schedule, params
+      steps/*.sql|*.py       # step bodies — code only
+  themes/
+    <name>.theme.yaml        # colors, typography, spacing, widget defaults
+  components/
+    <name>.component.yaml    # reusable composites of base widgets
+  roles.yaml                 # roles, artifact permissions, user-attribute mappings
+```
+
+## Format design rules
+
+- **YAML on disk, JSON internally.** Every format has a JSON Schema. Validation, indexing and the builder work on the JSON form; YAML is the human/LLM representation. Round-trip YAML↔JSON must be lossless.
+- **Expressions, not programs.** Properties accept literals or small expressions in `${...}` (e.g. `color: "${value < 0 ? 'danger' : 'ok'}"`). Define a minimal expression language (comparisons, arithmetic, string ops, references to `value`, `row`, `user`, `filters`). No loops, no arbitrary code in YAML.
+- **Semantic layout.** Containers: `stack`, `row`, `grid` (fractional columns), `tabs`, `card`, `section`, with nesting. Pixels are the renderer's job. Provide a constrained `style:` escape hatch (whitelisted CSS subset) for the rare case.
+- **Stable ids.** Every widget, page, filter, field, step has a `id` chosen by the author, never regenerated. Ids are the addresses LLMs and users use.
+- **Data binding by reference only.** Widgets reference `measure:` / `dimension:` names from a model; never SQL, never column names. The semantic engine generates the SQL.
+- **Charts.** A single `chart` widget with a Vega-Lite-inspired grammar (`mark`, `x`, `y`, `series`, `stack`, `facet`) rather than many preset chart types.
+- **Forms.** A `form` references a `writable` entity in the model. The platform owns the DDL (creates/migrates the table in a dedicated schema, adds audit columns, keeps a history table). Form data lives in the customer's database, reachable by any external tool.
+- **Excel reports.** Support two authoring modes: (a) `report.yaml` bindings (cell/range → query), (b) in-cell formulas in the template like `=BI.VALUE("net_revenue", "region=EMEA")` resolved at generation time. Rendering via `openpyxl` preserving template styles.
+
+## Tech stack (initial decision — revisit with evidence)
+
+- **Backend:** Python 3.12, FastAPI. Semantic engine on `sqlglot` + Apache Arrow for all in-process data. Pipelines runner: `dlt` for extraction, dbt-compatible SQL execution, plain Python step executor. Scheduler: APScheduler initially; design for replacement.
+- **Query backends (in order):** DuckDB (zero-setup dev/demo and small prod; reads CSV/Parquet/Excel; extensions for Postgres/S3) → PostgreSQL (also the default write-back store) → SAP HANA / Datasphere (via `hdbcli`, Datasphere Open SQL schema) → Snowflake, Databricks SQL, BigQuery.
+- **Frontend:** TypeScript, React, Vite. Rendering engine consumes the JSON form of artifacts. Widget library implemented as React components with a typed props contract and a property schema that drives the builder's property panel. Charts via a Vega-Lite-compatible renderer or ECharts behind the grammar.
+- **Git:** `pygit2`/`dulwich` or shelling out to `git`; projects are cloned per deployment; branches = environments (`dev` → `staging` → `main`). Builder commits to the working branch; "Publish" = merge/deploy.
+- **Monorepo:** `packages/formats` (JSON Schemas, canonical serializer, validator — shared, must be usable standalone as a CLI), `packages/engine` (semantic/query), `packages/runtime` (API, scheduler, auth), `packages/web` (builder + renderer), `packages/cli` (download/upload/validate/deploy; later an MCP server).
+
+## Delivery phases
+
+**Phase 0 — prove the loop (weeks, not months).**
+Model format + dashboard format + JSON Schemas + canonical serializer + validator + CLI (`validate`, `render`). Renderer that draws a dashboard from YAML on DuckDB over local Parquet/CSV. No builder, no auth, no scheduler. Success test: take a sample dashboard, send the YAML to an LLM, paste back the result, `validate`, render, see the change.
+
+**Phase 1 — runtime.** Web app, Git-backed projects, deploy from branch, Postgres backend, roles/RLS, cross-filtering, navigation between dashboards, themes.
+
+**Phase 2 — forms (write-back).** Writable entities, DDL management, audit/history, form artifact + renderer. This is the first major differentiator; ship before builders.
+
+**Phase 3 — Excel reports + scheduling + bursting.**
+
+**Phase 4 — pipelines.** `dlt` sources, SQL/Python steps, DAG runner, lineage from pipeline → model → widget.
+
+**Phase 5 — visual builders**, one per stabilized format: model, dashboard, form, report, pipeline DAG. Each builder is a thin editor over the JSON form and must pass the zero-diff round-trip test.
+
+**Phase 6 — CLI/MCP for agents**, SAP HANA/Datasphere connector, cloud warehouses.
+
+## Working rules for Claude Code in this repo
+
+- Before implementing a format, write (1) a sample artifact in YAML that a human would be happy to read, (2) its JSON Schema, (3) round-trip tests, (4) at least three validator error cases with the exact message text. Only then write the runtime.
+- Keep sample projects under `examples/` and treat them as the executable spec. Every feature adds or changes an example.
+- Prefer small, composable modules over frameworks. No ORMs for the engine path; Arrow tables end-to-end.
+- Never add an LLM call to the product code. If a feature "needs AI", the answer is a better format or a CLI/MCP surface for an external agent.
+- When unsure whether something belongs in Git or in the runtime database, apply the rule: *rules, schemas and mappings → Git; identities, secrets, data, logs → database.*
+- Measure the format: track line count of the example dashboards. Growth without new capability is a regression.
+- Document decisions in `docs/adr/` as short ADRs (context, decision, consequences).
+
+## Explicit non-goals (for now)
+
+- Not an Airflow/Dagster replacement; not an Airbyte replacement.
+- Not a planning/budgeting system (forms write to tables; no allocations, no versions of plans).
+- Not a general low-code app builder (forms are "write to a model entity", nothing more).
+- No embedded chat/assistant, no "ask your data" feature.
+- No desktop client.

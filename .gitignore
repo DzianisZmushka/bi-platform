@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+node_modules/
+dist/
+# runtime state never lives in Git (see CLAUDE.md)
+*.duckdb
+*.duckdb.wal
+.env

@@ -1,0 +1,284 @@
+dashboard: commercial-review
+title: Commercial review
+description: |
+  Monthly commercial review for the leadership team. Summary against targets,
+  regional drill-down, and product and customer detail.
+model: sales
+
+filters:
+  - filter: period
+    dimension: date
+    default: this_year
+  - filter: region
+    dimension: region
+  - filter: channel
+    dimension: channel
+  - filter: segment
+    dimension: segment
+  - filter: country
+    dimension: country
+    pages: [regions, products]
+  - filter: customer
+    dimension: customer_name
+    pages: [products]
+
+pages:
+  - page: summary
+    title: Executive summary
+    items:
+      - text: intro
+        content: |
+          Net revenue against finance targets for the selected period.
+          Click a region to open its regional view.
+      - row: headline
+        items:
+          - kpi: revenue
+            measure: net_revenue
+            target: revenue_target
+            sparkline: date.month
+          - kpi: attainment
+            measure: target_attainment
+            color: "${value < 0.95 ? 'danger' : value < 1 ? 'warning' : 'ok'}"
+          - kpi: margin
+            measure: gross_margin
+            compare: previous_year
+          - kpi: margin_rate
+            measure: margin_pct
+            compare: previous_year
+          - kpi: customers
+            measure: active_customers
+            compare: previous_year
+          - kpi: returns
+            measure: return_rate
+            compare: previous_year
+            color: "${value > 0.04 ? 'danger' : value > 0.03 ? 'warning' : 'ok'}"
+      - grid: performance
+        columns: [2, 1]
+        items:
+          - chart: revenue_vs_target
+            title: Net revenue vs target
+            mark: line
+            x: date.month
+            y: [net_revenue, revenue_target]
+          - chart: attainment_by_region
+            mark: bar
+            x: region
+            y: target_attainment
+            on_click:
+              navigate: regions
+              set: { region: "${row.region}" }
+            color: "${value < 0.95 ? 'danger' : value < 1 ? 'warning' : 'ok'}"
+          - chart: channel_mix
+            title: Channel mix
+            mark: arc
+            y: net_revenue
+            series: channel
+          - card: watchlist
+            title: Lowest attainment
+            items:
+              - table: lowest_regions
+                rows: [region]
+                values: [net_revenue, revenue_target, target_gap, target_attainment]
+                sort: target_attainment
+                limit: 5
+                on_click:
+                  navigate: regions
+                  set: { region: "${row.region}" }
+                cells:
+                  target_gap: { color: "${value < 0 ? 'danger' : 'ok'}" }
+                  target_attainment: { color: "${value < 1 ? 'warning' : 'ok'}" }
+      - row: links
+        items:
+          - button: open_regions
+            label: Regional performance
+            on_click: { navigate: regions }
+          - button: open_products
+            label: Products & customers
+            on_click: { navigate: products }
+          - button: open_overview
+            label: Revenue overview dashboard
+            on_click: { navigate: revenue-overview/overview }
+
+  - page: regions
+    title: Regional performance
+    items:
+      - text: region_hint
+        content: Showing all regions. Pick one in the filter bar or on the summary page.
+        visible: "${filters.region == null}"
+      - row: region_kpis
+        items:
+          - kpi: region_revenue
+            measure: net_revenue
+            target: revenue_target
+          - kpi: region_attainment
+            measure: target_attainment
+            color: "${value < 0.95 ? 'danger' : value < 1 ? 'warning' : 'ok'}"
+          - kpi: region_aov
+            measure: aov
+            compare: previous_year
+          - kpi: region_discount
+            measure: discount_rate
+            compare: previous_year
+            color: "${value > 0.08 ? 'warning' : 'ok'}"
+      - grid: region_trends
+        columns: [1, 1]
+        items:
+          - chart: revenue_by_region
+            mark: area
+            x: date.month
+            y: net_revenue
+            series: region
+            stack: true
+          - chart: attainment_trend
+            mark: line
+            x: date.month
+            y: target_attainment
+            series: region
+      - card: countries
+        title: Countries
+        items:
+          - table: country_table
+            rows: [region, country]
+            values: [net_revenue, orders, aov, margin_pct, return_rate]
+            sort: -net_revenue
+            totals: true
+            on_click:
+              navigate: products
+              set: { country: "${row.country}" }
+            cells:
+              net_revenue: { bar: true }
+              margin_pct: { color: "${value < 0.3 ? 'danger' : value < 0.4 ? 'warning' : 'ok'}" }
+              return_rate: { color: "${value > 0.04 ? 'danger' : 'neutral'}" }
+      - tabs: breakdown
+        items:
+          - tab: by_segment
+            title: By segment
+            items:
+              - grid: segment_grid
+                columns: [1, 1]
+                items:
+                  - chart: segment_channel
+                    mark: bar
+                    x: segment
+                    y: net_revenue
+                    series: channel
+                    stack: true
+                  - table: segment_table
+                    rows: [segment]
+                    columns: [channel]
+                    values: [net_revenue]
+                    totals: true
+          - tab: by_channel
+            title: By channel
+            items:
+              - grid: channel_grid
+                columns: [2, 1, 1]
+                items:
+                  - chart: channel_trend
+                    mark: line
+                    x: date.month
+                    y: net_revenue
+                    series: channel
+                  - chart: channel_margin
+                    mark: bar
+                    x: channel
+                    y: margin_pct
+                    color: "${value < 0.35 ? 'warning' : 'accent'}"
+                  - chart: partner_discounts
+                    title: Partner discount rate
+                    mark: line
+                    x: date.month
+                    y: discount_rate
+                    where: { channel: Partner }
+          - tab: by_customer
+            title: Top customers
+            items:
+              - table: customer_table
+                rows: [customer_name, segment, country]
+                values: [net_revenue, orders, aov, margin_pct]
+                sort: -net_revenue
+                limit: 25
+                on_click:
+                  navigate: products
+                  set: { customer: "${row.customer_name}" }
+                cells:
+                  margin_pct: { color: "${value < 0.3 ? 'danger' : 'ok'}" }
+      - button: back_to_summary
+        label: Back to summary
+        on_click: { navigate: summary }
+
+  - page: products
+    title: Products & customers
+    items:
+      - row: product_kpis
+        items:
+          - kpi: units_sold
+            measure: units
+            compare: previous_year
+          - kpi: product_margin
+            measure: gross_margin
+            compare: previous_year
+          - kpi: product_returns
+            measure: return_rate
+            compare: previous_year
+            color: "${value > 0.04 ? 'danger' : value > 0.03 ? 'warning' : 'ok'}"
+          - kpi: product_discount
+            measure: discount_rate
+            compare: previous_year
+      - grid: product_charts
+        columns: [1, 1]
+        items:
+          - chart: category_drill
+            title: Net revenue by product (click to drill down)
+            mark: bar
+            x: net_revenue
+            y: product
+            sort: -net_revenue
+          - chart: margin_vs_returns
+            title: Margin vs return rate per product
+            mark: point
+            x: margin_pct
+            y: return_rate
+            series: category
+            detail: product_name
+      - section: product_detail
+        title: Product detail
+        items:
+          - table: product_table
+            rows: [category, subcategory, product_name]
+            values: [units, net_revenue, gross_margin, margin_pct, return_rate, discount_rate]
+            sort: -net_revenue
+            totals: true
+            cells:
+              net_revenue: { bar: true }
+              margin_pct: { color: "${value < 0.3 ? 'danger' : value < 0.4 ? 'warning' : 'ok'}" }
+              return_rate: { color: "${value > 0.04 ? 'danger' : 'neutral'}" }
+      - grid: product_mix
+        columns: [1, 1, 1]
+        items:
+          - chart: brand_share
+            mark: arc
+            y: net_revenue
+            series: brand
+          - chart: discount_by_channel
+            mark: bar
+            x: discount_rate
+            y: channel
+            series: category
+          - chart: signup_cohorts
+            title: Active customers by signup quarter
+            mark: bar
+            x: signup_date.quarter
+            y: active_customers
+      - section: notes
+        title: Definitions
+        collapsed: true
+        items:
+          - text: definitions
+            content: |
+              **Net revenue** is after discounts and includes returned lines.
+              **Return rate** is returned net revenue divided by net revenue.
+              **Attainment** compares net revenue with the regional monthly target.
+      - button: back_to_regions
+        label: Back to regional performance
+        on_click: { navigate: regions }

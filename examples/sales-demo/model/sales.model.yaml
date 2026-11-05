@@ -1,0 +1,77 @@
+model: sales
+description: Order-line sales with customers, products, regions and monthly revenue targets.
+
+entities:
+  order_lines:
+    description: One row per order line. Grain of all sales measures.
+    table: order_lines
+    key: [order_id, line_no]
+    joins: { calendar: order_date, customers: customer_id, products: product_id }
+    dimensions:
+      order_id: { label: Order }
+      channel:
+      returned: { type: boolean }
+    measures:
+      gross_revenue: { sum: quantity * unit_price, format: currency }
+      discount_amount: { sum: quantity * unit_price * discount, format: currency }
+      net_revenue: { sum: quantity * unit_price * (1 - discount), format: currency }
+      cogs: { sum: quantity * unit_cost, label: COGS, format: currency }
+      gross_margin: { calc: net_revenue - cogs, format: currency }
+      margin_pct: { calc: gross_margin / net_revenue, label: Margin %, format: percent }
+      orders: { count_distinct: order_id, format: integer }
+      units: { sum: quantity, format: integer }
+      aov: { calc: net_revenue / orders, label: Avg order value, format: currency }
+      active_customers: { count_distinct: customer_id, format: integer }
+      returned_revenue:
+        sum: quantity * unit_price * (1 - discount)
+        where: returned
+        format: currency
+      return_rate: { calc: returned_revenue / net_revenue, format: percent }
+      discount_rate: { calc: discount_amount / gross_revenue, format: percent }
+
+  targets:
+    description: Monthly net revenue targets per region, set by finance.
+    table: targets
+    key: [month, region_id]
+    joins:
+      calendar: { column: month, grain: month }
+      regions: region_id
+    measures:
+      revenue_target: { sum: revenue_target, label: Target, format: currency }
+      target_attainment: { calc: net_revenue / revenue_target, label: Attainment, format: percent }
+      target_gap: { calc: net_revenue - revenue_target, label: Gap to target, format: currency }
+
+  calendar:
+    table: calendar
+    key: date
+    dimensions:
+      date: { type: date }
+
+  customers:
+    table: customers
+    key: customer_id
+    joins: { regions: region_id }
+    dimensions:
+      customer_name: { label: Customer }
+      segment:
+      country:
+      signup_date: { type: date }
+
+  products:
+    table: products
+    key: product_id
+    dimensions:
+      product_name: { label: Product }
+      category:
+      subcategory:
+      brand:
+
+  regions:
+    table: regions
+    key: region_id
+    dimensions:
+      region: { column: region_name }
+
+hierarchies:
+  product: [category, subcategory, product_name]
+  geography: [region, country]

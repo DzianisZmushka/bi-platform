@@ -1,0 +1,401 @@
+customer_id,customer_name,segment,country,region_id,signup_date
+C0001,Customer 0001,SMB,Mexico,latam,2024-05-18
+C0002,Customer 0002,Enterprise,United States,na,2026-08-01
+C0003,Customer 0003,Mid-market,Canada,na,2023-11-18
+C0004,Customer 0004,Mid-market,Mexico,latam,2024-07-21
+C0005,Customer 0005,SMB,Poland,emea,2025-04-23
+C0006,Customer 0006,Mid-market,Brazil,latam,2025-02-06
+C0007,Customer 0007,SMB,Poland,emea,2023-10-20
+C0008,Customer 0008,SMB,Canada,na,2026-01-06
+C0009,Customer 0009,Mid-market,Canada,na,2025-11-29
+C0010,Customer 0010,Enterprise,Singapore,apac,2024-04-14
+C0011,Customer 0011,SMB,Chile,latam,2024-09-11
+C0012,Customer 0012,Enterprise,Australia,apac,2026-06-16
+C0013,Customer 0013,SMB,United States,na,2024-02-20
+C0014,Customer 0014,SMB,Australia,apac,2024-02-10
+C0015,Customer 0015,Mid-market,Canada,na,2025-10-29
+C0016,Customer 0016,Mid-market,United Kingdom,emea,2024-10-14
+C0017,Customer 0017,Mid-market,Poland,emea,2024-09-02
+C0018,Customer 0018,Enterprise,Australia,apac,2024-06-04
+C0019,Customer 0019,SMB,Canada,na,2024-08-30
+C0020,Customer 0020,SMB,Poland,emea,2026-06-13
+C0021,Customer 0021,SMB,Mexico,latam,2023-12-15
+C0022,Customer 0022,SMB,Poland,emea,2024-06-15
+C0023,Customer 0023,Mid-market,Canada,na,2024-06-05
+C0024,Customer 0024,Mid-market,Canada,na,2024-06-25
+C0025,Customer 0025,Mid-market,France,emea,2026-01-29
+C0026,Customer 0026,Mid-market,Spain,emea,2023-10-31
+C0027,Customer 0027,Mid-market,Canada,na,2025-11-21
+C0028,Customer 0028,Mid-market,Japan,apac,2024-06-30
+C0029,Customer 0029,SMB,United Kingdom,emea,2025-08-13
+C0030,Customer 0030,SMB,Brazil,latam,2023-02-24
+C0031,Customer 0031,SMB,United Kingdom,emea,2023-07-10
+C0032,Customer 0032,Mid-market,Poland,emea,2023-02-25
+C0033,Customer 0033,Mid-market,France,emea,2026-05-17
+C0034,Customer 0034,SMB,Australia,apac,2026-06-20
+C0035,Customer 0035,SMB,Mexico,latam,2024-09-24
+C0036,Customer 0036,SMB,Canada,na,2025-06-18
+C0037,Customer 0037,Enterprise,Spain,emea,2023-11-13
+C0038,Customer 0038,SMB,United States,na,2025-03-13
+C0039,Customer 0039,Mid-market,Canada,na,2025-10-26
+C0040,Customer 0040,SMB,Canada,na,2023-07-09
+C0041,Customer 0041,Mid-market,Japan,apac,2025-12-22
+C0042,Customer 0042,Mid-market,Spain,emea,2024-05-16
+C0043,Customer 0043,Enterprise,Singapore,apac,2023-10-12
+C0044,Customer 0044,Mid-market,Australia,apac,2023-02-22
+C0045,Customer 0045,Mid-market,Australia,apac,2024-10-14
+C0046,Customer 0046,Mid-market,Japan,apac,2024-04-06
+C0047,Customer 0047,SMB,Mexico,latam,2023-03-13
+C0048,Customer 0048,Enterprise,Spain,emea,2026-01-04
+C0049,Customer 0049,Mid-market,Australia,apac,2025-04-11
+C0050,Customer 0050,Mid-market,United States,na,2025-11-04
+C0051,Customer 0051,Enterprise,United States,na,2023-06-05
+C0052,Customer 0052,Enterprise,Mexico,latam,2026-05-23
+C0053,Customer 0053,SMB,Germany,emea,2023-10-07
+C0054,Customer 0054,Mid-market,France,emea,2025-11-19
+C0055,Customer 0055,SMB,United States,na,2024-02-26
+C0056,Customer 0056,Mid-market,United States,na,2026-08-22
+C0057,Customer 0057,Mid-market,Brazil,latam,2024-09-16
+C0058,Customer 0058,Mid-market,France,emea,2025-04-18
+C0059,Customer 0059,Enterprise,France,emea,2025-09-19
+C0060,Customer 0060,SMB,Japan,apac,2023-02-22
+C0061,Customer 0061,SMB,Australia,apac,2025-09-03
+C0062,Customer 0062,Mid-market,United States,na,2023-07-01
+C0063,Customer 0063,SMB,France,emea,2024-08-27
+C0064,Customer 0064,SMB,Poland,emea,2025-02-10
+C0065,Customer 0065,Mid-market,Japan,apac,2026-07-15
+C0066,Customer 0066,SMB,Canada,na,2026-07-25
+C0067,Customer 0067,SMB,Japan,apac,2025-07-13
+C0068,Customer 0068,Mid-market,Germany,emea,2026-06-16
+C0069,Customer 0069,SMB,United States,na,2025-08-19
+C0070,Customer 0070,Mid-market,France,emea,2024-01-15
+C0071,Customer 0071,SMB,Canada,na,2023-04-24
+C0072,Customer 0072,Mid-market,United States,na,2026-02-01
+C0073,Customer 0073,Mid-market,Germany,emea,2025-09-29
+C0074,Customer 0074,SMB,Mexico,latam,2025-08-11
+C0075,Customer 0075,Enterprise,Mexico,latam,2023-02-12
+C0076,Customer 0076,Mid-market,United States,na,2024-05-21
+C0077,Customer 0077,SMB,Brazil,latam,2026-07-17
+C0078,Customer 0078,Mid-market,Poland,emea,2024-10-13
+C0079,Customer 0079,SMB,Canada,na,2025-12-19
+C0080,Customer 0080,Mid-market,Spain,emea,2023-12-20
+C0081,Customer 0081,Mid-market,Germany,emea,2026-06-20
+C0082,Customer 0082,Enterprise,Poland,emea,2024-11-25
+C0083,Customer 0083,SMB,Singapore,apac,2025-07-18
+C0084,Customer 0084,Mid-market,Singapore,apac,2023-04-03
+C0085,Customer 0085,Enterprise,United States,na,2025-10-10
+C0086,Customer 0086,SMB,United Kingdom,emea,2026-02-19
+C0087,Customer 0087,Enterprise,Canada,na,2023-12-28
+C0088,Customer 0088,Mid-market,Australia,apac,2025-02-23
+C0089,Customer 0089,Enterprise,France,emea,2023-01-25
+C0090,Customer 0090,SMB,United States,na,2025-07-18
+C0091,Customer 0091,SMB,Canada,na,2024-10-11
+C0092,Customer 0092,Mid-market,United States,na,2025-12-21
+C0093,Customer 0093,SMB,Canada,na,2024-11-14
+C0094,Customer 0094,SMB,United States,na,2024-10-02
+C0095,Customer 0095,SMB,Spain,emea,2023-05-14
+C0096,Customer 0096,Mid-market,United States,na,2025-01-07
+C0097,Customer 0097,Mid-market,Canada,na,2025-10-12
+C0098,Customer 0098,Mid-market,Canada,na,2025-05-28
+C0099,Customer 0099,Mid-market,Canada,na,2023-05-18
+C0100,Customer 0100,SMB,Australia,apac,2024-01-11
+C0101,Customer 0101,SMB,Brazil,latam,2023-11-05
+C0102,Customer 0102,SMB,France,emea,2024-05-06
+C0103,Customer 0103,Mid-market,Poland,emea,2024-10-09
+C0104,Customer 0104,SMB,Mexico,latam,2026-03-26
+C0105,Customer 0105,Enterprise,Canada,na,2026-02-04
+C0106,Customer 0106,SMB,United States,na,2024-07-03
+C0107,Customer 0107,SMB,United States,na,2025-12-18
+C0108,Customer 0108,Enterprise,Australia,apac,2025-09-09
+C0109,Customer 0109,SMB,Spain,emea,2025-08-27
+C0110,Customer 0110,SMB,Mexico,latam,2024-02-03
+C0111,Customer 0111,SMB,United States,na,2026-07-23
+C0112,Customer 0112,Enterprise,Spain,emea,2023-11-19
+C0113,Customer 0113,SMB,Japan,apac,2023-09-15
+C0114,Customer 0114,Mid-market,Mexico,latam,2025-12-23
+C0115,Customer 0115,Mid-market,Poland,emea,2025-09-16
+C0116,Customer 0116,Mid-market,United States,na,2025-03-21
+C0117,Customer 0117,Mid-market,Poland,emea,2023-04-19
+C0118,Customer 0118,Mid-market,Brazil,latam,2025-07-20
+C0119,Customer 0119,Enterprise,Spain,emea,2023-01-12
+C0120,Customer 0120,SMB,Singapore,apac,2024-12-01
+C0121,Customer 0121,Mid-market,United States,na,2026-04-11
+C0122,Customer 0122,SMB,Singapore,apac,2025-03-18
+C0123,Customer 0123,Mid-market,United Kingdom,emea,2024-09-15
+C0124,Customer 0124,Mid-market,Poland,emea,2025-06-29
+C0125,Customer 0125,Mid-market,Spain,emea,2025-11-20
+C0126,Customer 0126,SMB,Germany,emea,2023-10-12
+C0127,Customer 0127,Mid-market,United States,na,2026-02-15
+C0128,Customer 0128,Mid-market,Australia,apac,2026-03-20
+C0129,Customer 0129,SMB,Canada,na,2023-04-04
+C0130,Customer 0130,Enterprise,Poland,emea,2024-12-17
+C0131,Customer 0131,Enterprise,United States,na,2025-01-21
+C0132,Customer 0132,SMB,Canada,na,2023-08-23
+C0133,Customer 0133,SMB,Australia,apac,2025-11-17
+C0134,Customer 0134,Mid-market,Germany,emea,2024-03-10
+C0135,Customer 0135,SMB,Singapore,apac,2025-01-23
+C0136,Customer 0136,SMB,United Kingdom,emea,2026-04-01
+C0137,Customer 0137,Mid-market,France,emea,2024-07-26
+C0138,Customer 0138,Enterprise,United States,na,2024-04-14
+C0139,Customer 0139,SMB,Brazil,latam,2023-09-12
+C0140,Customer 0140,SMB,United States,na,2024-08-07
+C0141,Customer 0141,Mid-market,Poland,emea,2026-01-08
+C0142,Customer 0142,Enterprise,United Kingdom,emea,2025-04-02
+C0143,Customer 0143,SMB,United Kingdom,emea,2024-06-10
+C0144,Customer 0144,SMB,France,emea,2026-01-13
+C0145,Customer 0145,SMB,Japan,apac,2023-10-23
+C0146,Customer 0146,Enterprise,United States,na,2024-04-09
+C0147,Customer 0147,SMB,Germany,emea,2023-11-28
+C0148,Customer 0148,SMB,Canada,na,2024-11-25
+C0149,Customer 0149,Mid-market,Canada,na,2023-03-23
+C0150,Customer 0150,SMB,United States,na,2026-05-18
+C0151,Customer 0151,SMB,Poland,emea,2025-03-23
+C0152,Customer 0152,Mid-market,United Kingdom,emea,2023-09-17
+C0153,Customer 0153,SMB,France,emea,2023-03-20
+C0154,Customer 0154,Mid-market,Canada,na,2023-03-01
+C0155,Customer 0155,SMB,Singapore,apac,2024-08-15
+C0156,Customer 0156,SMB,United States,na,2025-01-02
+C0157,Customer 0157,Mid-market,Canada,na,2026-03-26
+C0158,Customer 0158,SMB,Chile,latam,2024-12-26
+C0159,Customer 0159,Enterprise,Spain,emea,2024-04-07
+C0160,Customer 0160,SMB,Brazil,latam,2025-01-31
+C0161,Customer 0161,SMB,Chile,latam,2024-03-26
+C0162,Customer 0162,SMB,India,apac,2024-08-03
+C0163,Customer 0163,Enterprise,Japan,apac,2025-02-15
+C0164,Customer 0164,SMB,Canada,na,2023-06-18
+C0165,Customer 0165,SMB,India,apac,2024-07-22
+C0166,Customer 0166,SMB,Canada,na,2024-02-23
+C0167,Customer 0167,SMB,United States,na,2023-03-13
+C0168,Customer 0168,Mid-market,Singapore,apac,2025-06-24
+C0169,Customer 0169,Mid-market,United States,na,2025-11-08
+C0170,Customer 0170,Enterprise,India,apac,2023-06-12
+C0171,Customer 0171,Mid-market,Japan,apac,2023-07-19
+C0172,Customer 0172,SMB,Singapore,apac,2024-08-29
+C0173,Customer 0173,SMB,United Kingdom,emea,2024-08-08
+C0174,Customer 0174,Enterprise,United States,na,2025-03-12
+C0175,Customer 0175,SMB,United Kingdom,emea,2024-02-03
+C0176,Customer 0176,Mid-market,India,apac,2026-02-26
+C0177,Customer 0177,SMB,United States,na,2025-06-13
+C0178,Customer 0178,SMB,Mexico,latam,2025-10-22
+C0179,Customer 0179,SMB,France,emea,2025-03-03
+C0180,Customer 0180,Mid-market,Australia,apac,2023-03-21
+C0181,Customer 0181,Mid-market,India,apac,2025-10-23
+C0182,Customer 0182,SMB,Canada,na,2025-08-07
+C0183,Customer 0183,Enterprise,Poland,emea,2023-12-09
+C0184,Customer 0184,Mid-market,Singapore,apac,2024-12-13
+C0185,Customer 0185,Mid-market,United States,na,2025-07-01
+C0186,Customer 0186,Mid-market,Canada,na,2023-04-05
+C0187,Customer 0187,Mid-market,Japan,apac,2023-05-18
+C0188,Customer 0188,Mid-market,United States,na,2026-06-18
+C0189,Customer 0189,Enterprise,United States,na,2023-09-03
+C0190,Customer 0190,SMB,United States,na,2023-03-14
+C0191,Customer 0191,SMB,United States,na,2026-08-01
+C0192,Customer 0192,SMB,Germany,emea,2025-08-14
+C0193,Customer 0193,SMB,United States,na,2024-03-02
+C0194,Customer 0194,SMB,Canada,na,2023-07-07
+C0195,Customer 0195,Mid-market,United States,na,2023-02-14
+C0196,Customer 0196,SMB,Canada,na,2025-01-08
+C0197,Customer 0197,Enterprise,Brazil,latam,2024-01-06
+C0198,Customer 0198,Mid-market,Mexico,latam,2024-09-23
+C0199,Customer 0199,SMB,Australia,apac,2025-04-16
+C0200,Customer 0200,Mid-market,Canada,na,2025-02-02
+C0201,Customer 0201,SMB,France,emea,2025-08-18
+C0202,Customer 0202,Mid-market,France,emea,2023-11-18
+C0203,Customer 0203,Mid-market,Australia,apac,2024-04-05
+C0204,Customer 0204,Enterprise,Germany,emea,2024-09-23
+C0205,Customer 0205,Mid-market,Singapore,apac,2024-08-08
+C0206,Customer 0206,Mid-market,Brazil,latam,2023-09-07
+C0207,Customer 0207,SMB,Brazil,latam,2025-03-19
+C0208,Customer 0208,Enterprise,Germany,emea,2025-04-08
+C0209,Customer 0209,Mid-market,United States,na,2023-04-06
+C0210,Customer 0210,Enterprise,India,apac,2024-04-09
+C0211,Customer 0211,Enterprise,Poland,emea,2024-05-14
+C0212,Customer 0212,SMB,Germany,emea,2023-01-05
+C0213,Customer 0213,SMB,India,apac,2024-11-09
+C0214,Customer 0214,SMB,United States,na,2024-10-17
+C0215,Customer 0215,SMB,France,emea,2024-12-05
+C0216,Customer 0216,SMB,Mexico,latam,2025-01-29
+C0217,Customer 0217,SMB,Canada,na,2023-06-13
+C0218,Customer 0218,SMB,United States,na,2025-07-16
+C0219,Customer 0219,Enterprise,United Kingdom,emea,2023-05-09
+C0220,Customer 0220,Enterprise,Canada,na,2024-08-18
+C0221,Customer 0221,Mid-market,United States,na,2025-04-17
+C0222,Customer 0222,SMB,Canada,na,2024-05-28
+C0223,Customer 0223,SMB,Poland,emea,2025-12-07
+C0224,Customer 0224,SMB,Japan,apac,2025-03-18
+C0225,Customer 0225,Mid-market,United States,na,2025-03-24
+C0226,Customer 0226,Mid-market,Singapore,apac,2025-08-12
+C0227,Customer 0227,SMB,United Kingdom,emea,2024-09-03
+C0228,Customer 0228,Mid-market,Poland,emea,2023-01-18
+C0229,Customer 0229,SMB,Mexico,latam,2026-03-14
+C0230,Customer 0230,Mid-market,India,apac,2023-02-24
+C0231,Customer 0231,Mid-market,Spain,emea,2026-03-03
+C0232,Customer 0232,SMB,Poland,emea,2023-07-11
+C0233,Customer 0233,SMB,Germany,emea,2024-01-11
+C0234,Customer 0234,Mid-market,Spain,emea,2024-07-25
+C0235,Customer 0235,SMB,France,emea,2025-02-07
+C0236,Customer 0236,Mid-market,United Kingdom,emea,2025-06-24
+C0237,Customer 0237,Enterprise,Singapore,apac,2026-07-21
+C0238,Customer 0238,Enterprise,United States,na,2023-02-15
+C0239,Customer 0239,Mid-market,France,emea,2023-05-03
+C0240,Customer 0240,SMB,Chile,latam,2026-03-19
+C0241,Customer 0241,SMB,United States,na,2024-01-21
+C0242,Customer 0242,SMB,United States,na,2024-11-05
+C0243,Customer 0243,Enterprise,India,apac,2024-04-04
+C0244,Customer 0244,Enterprise,Mexico,latam,2025-12-03
+C0245,Customer 0245,Enterprise,United Kingdom,emea,2025-08-06
+C0246,Customer 0246,SMB,United States,na,2026-05-27
+C0247,Customer 0247,Mid-market,United Kingdom,emea,2024-06-07
+C0248,Customer 0248,Mid-market,France,emea,2025-04-24
+C0249,Customer 0249,SMB,France,emea,2024-07-30
+C0250,Customer 0250,Enterprise,Singapore,apac,2026-04-29
+C0251,Customer 0251,SMB,Singapore,apac,2023-08-06
+C0252,Customer 0252,Mid-market,Canada,na,2025-05-09
+C0253,Customer 0253,Mid-market,France,emea,2023-11-05
+C0254,Customer 0254,Mid-market,Singapore,apac,2023-01-06
+C0255,Customer 0255,Mid-market,Canada,na,2024-04-17
+C0256,Customer 0256,SMB,Canada,na,2024-03-10
+C0257,Customer 0257,SMB,India,apac,2025-07-20
+C0258,Customer 0258,SMB,Canada,na,2024-10-18
+C0259,Customer 0259,SMB,Chile,latam,2025-06-18
+C0260,Customer 0260,SMB,Spain,emea,2025-10-06
+C0261,Customer 0261,SMB,United Kingdom,emea,2023-02-15
+C0262,Customer 0262,Mid-market,India,apac,2026-02-23
+C0263,Customer 0263,Mid-market,Spain,emea,2025-01-24
+C0264,Customer 0264,SMB,United Kingdom,emea,2023-03-06
+C0265,Customer 0265,SMB,United States,na,2026-03-28
+C0266,Customer 0266,Mid-market,United Kingdom,emea,2025-10-15
+C0267,Customer 0267,Mid-market,United States,na,2023-12-05
+C0268,Customer 0268,SMB,Chile,latam,2026-05-04
+C0269,Customer 0269,Mid-market,Spain,emea,2025-06-30
+C0270,Customer 0270,SMB,France,emea,2025-09-08
+C0271,Customer 0271,Enterprise,United States,na,2025-11-23
+C0272,Customer 0272,Mid-market,United States,na,2025-11-04
+C0273,Customer 0273,SMB,France,emea,2023-03-11
+C0274,Customer 0274,Mid-market,United States,na,2025-05-12
+C0275,Customer 0275,SMB,Poland,emea,2023-05-12
+C0276,Customer 0276,SMB,United States,na,2023-08-09
+C0277,Customer 0277,SMB,Spain,emea,2023-01-03
+C0278,Customer 0278,SMB,Germany,emea,2023-03-30
+C0279,Customer 0279,Enterprise,Singapore,apac,2024-06-05
+C0280,Customer 0280,Mid-market,Canada,na,2024-08-25
+C0281,Customer 0281,Enterprise,United States,na,2026-03-24
+C0282,Customer 0282,SMB,France,emea,2025-05-12
+C0283,Customer 0283,Mid-market,Germany,emea,2023-10-12
+C0284,Customer 0284,Mid-market,United States,na,2024-03-07
+C0285,Customer 0285,SMB,United States,na,2026-01-01
+C0286,Customer 0286,Mid-market,United States,na,2026-07-04
+C0287,Customer 0287,SMB,Canada,na,2024-02-22
+C0288,Customer 0288,Mid-market,United States,na,2023-03-14
+C0289,Customer 0289,Mid-market,United States,na,2023-09-16
+C0290,Customer 0290,Mid-market,United States,na,2024-06-10
+C0291,Customer 0291,Mid-market,Canada,na,2026-08-16
+C0292,Customer 0292,Enterprise,Brazil,latam,2023-03-24
+C0293,Customer 0293,Mid-market,Canada,na,2025-02-28
+C0294,Customer 0294,SMB,Spain,emea,2023-12-14
+C0295,Customer 0295,SMB,United States,na,2023-03-14
+C0296,Customer 0296,SMB,United States,na,2026-07-19
+C0297,Customer 0297,Mid-market,United States,na,2024-04-01
+C0298,Customer 0298,SMB,Australia,apac,2023-02-11
+C0299,Customer 0299,SMB,Australia,apac,2026-08-22
+C0300,Customer 0300,SMB,Canada,na,2026-05-22
+C0301,Customer 0301,Mid-market,Chile,latam,2026-02-03
+C0302,Customer 0302,Enterprise,Australia,apac,2025-05-24
+C0303,Customer 0303,SMB,Canada,na,2025-07-07
+C0304,Customer 0304,Mid-market,United States,na,2023-02-04
+C0305,Customer 0305,SMB,Canada,na,2026-06-13
+C0306,Customer 0306,Mid-market,Poland,emea,2023-08-19
+C0307,Customer 0307,SMB,Australia,apac,2026-08-20
+C0308,Customer 0308,Mid-market,Canada,na,2023-07-01
+C0309,Customer 0309,SMB,United States,na,2023-07-02
+C0310,Customer 0310,Mid-market,Canada,na,2023-10-07
+C0311,Customer 0311,SMB,Brazil,latam,2024-01-15
+C0312,Customer 0312,Mid-market,Canada,na,2026-06-23
+C0313,Customer 0313,Enterprise,United States,na,2025-03-08
+C0314,Customer 0314,Mid-market,Germany,emea,2026-04-30
+C0315,Customer 0315,Mid-market,United States,na,2024-12-12
+C0316,Customer 0316,SMB,Germany,emea,2024-06-29
+C0317,Customer 0317,SMB,United States,na,2023-04-15
+C0318,Customer 0318,SMB,Singapore,apac,2023-01-19
+C0319,Customer 0319,Enterprise,United States,na,2025-01-29
+C0320,Customer 0320,SMB,Chile,latam,2026-01-03
+C0321,Customer 0321,Mid-market,United States,na,2024-04-07
+C0322,Customer 0322,SMB,United Kingdom,emea,2025-09-22
+C0323,Customer 0323,SMB,Mexico,latam,2024-08-06
+C0324,Customer 0324,SMB,India,apac,2024-05-13
+C0325,Customer 0325,SMB,Chile,latam,2023-11-20
+C0326,Customer 0326,SMB,Canada,na,2026-04-11
+C0327,Customer 0327,SMB,United Kingdom,emea,2025-03-06
+C0328,Customer 0328,SMB,United States,na,2023-04-29
+C0329,Customer 0329,Mid-market,Australia,apac,2024-11-11
+C0330,Customer 0330,SMB,Canada,na,2026-07-05
+C0331,Customer 0331,SMB,United States,na,2023-04-22
+C0332,Customer 0332,Mid-market,Mexico,latam,2023-02-16
+C0333,Customer 0333,Enterprise,United States,na,2024-01-04
+C0334,Customer 0334,SMB,France,emea,2024-12-01
+C0335,Customer 0335,SMB,Mexico,latam,2026-07-30
+C0336,Customer 0336,SMB,Germany,emea,2023-08-21
+C0337,Customer 0337,Enterprise,United States,na,2026-05-14
+C0338,Customer 0338,Mid-market,Chile,latam,2025-05-12
+C0339,Customer 0339,Enterprise,Brazil,latam,2023-03-03
+C0340,Customer 0340,Enterprise,Canada,na,2024-12-09
+C0341,Customer 0341,Mid-market,Canada,na,2023-01-14
+C0342,Customer 0342,SMB,Poland,emea,2025-10-09
+C0343,Customer 0343,SMB,Canada,na,2026-07-08
+C0344,Customer 0344,Mid-market,Singapore,apac,2024-07-28
+C0345,Customer 0345,SMB,Japan,apac,2025-01-30
+C0346,Customer 0346,Mid-market,Canada,na,2026-01-03
+C0347,Customer 0347,Mid-market,India,apac,2024-12-07
+C0348,Customer 0348,SMB,Australia,apac,2026-07-25
+C0349,Customer 0349,SMB,Canada,na,2023-02-04
+C0350,Customer 0350,Mid-market,Australia,apac,2023-11-01
+C0351,Customer 0351,Enterprise,Canada,na,2024-08-04
+C0352,Customer 0352,SMB,Poland,emea,2024-10-23
+C0353,Customer 0353,Mid-market,United States,na,2023-10-02
+C0354,Customer 0354,Enterprise,Spain,emea,2024-08-19
+C0355,Customer 0355,SMB,Brazil,latam,2026-02-13
+C0356,Customer 0356,Enterprise,Brazil,latam,2024-10-09
+C0357,Customer 0357,Mid-market,Canada,na,2023-03-26
+C0358,Customer 0358,Mid-market,Japan,apac,2024-10-27
+C0359,Customer 0359,SMB,Germany,emea,2026-03-11
+C0360,Customer 0360,SMB,Canada,na,2026-01-08
+C0361,Customer 0361,SMB,Spain,emea,2025-11-01
+C0362,Customer 0362,Mid-market,Poland,emea,2023-03-25
+C0363,Customer 0363,SMB,United States,na,2026-08-21
+C0364,Customer 0364,Mid-market,Canada,na,2024-12-26
+C0365,Customer 0365,Enterprise,Canada,na,2023-09-24
+C0366,Customer 0366,Enterprise,Singapore,apac,2025-01-17
+C0367,Customer 0367,Mid-market,Germany,emea,2025-02-06
+C0368,Customer 0368,SMB,Canada,na,2023-01-25
+C0369,Customer 0369,Mid-market,Germany,emea,2023-03-22
+C0370,Customer 0370,SMB,Canada,na,2024-10-14
+C0371,Customer 0371,SMB,Spain,emea,2025-04-01
+C0372,Customer 0372,Mid-market,Japan,apac,2026-07-05
+C0373,Customer 0373,Mid-market,Chile,latam,2024-01-27
+C0374,Customer 0374,Mid-market,France,emea,2023-07-26
+C0375,Customer 0375,Mid-market,United States,na,2024-05-07
+C0376,Customer 0376,SMB,Canada,na,2024-03-17
+C0377,Customer 0377,Enterprise,Australia,apac,2024-05-06
+C0378,Customer 0378,Mid-market,France,emea,2024-11-07
+C0379,Customer 0379,Mid-market,United States,na,2026-07-18
+C0380,Customer 0380,Enterprise,Spain,emea,2023-05-31
+C0381,Customer 0381,SMB,India,apac,2024-11-17
+C0382,Customer 0382,Enterprise,Singapore,apac,2023-03-13
+C0383,Customer 0383,Enterprise,Poland,emea,2023-01-22
+C0384,Customer 0384,Mid-market,Australia,apac,2026-06-23
+C0385,Customer 0385,SMB,United States,na,2025-05-21
+C0386,Customer 0386,Mid-market,France,emea,2023-01-22
+C0387,Customer 0387,SMB,Canada,na,2025-05-06
+C0388,Customer 0388,SMB,Poland,emea,2023-03-06
+C0389,Customer 0389,Mid-market,United States,na,2024-12-07
+C0390,Customer 0390,Mid-market,Canada,na,2025-01-22
+C0391,Customer 0391,Mid-market,Poland,emea,2025-08-18
+C0392,Customer 0392,Enterprise,Mexico,latam,2026-06-24
+C0393,Customer 0393,Mid-market,India,apac,2025-12-03
+C0394,Customer 0394,SMB,Germany,emea,2023-07-09
+C0395,Customer 0395,SMB,Brazil,latam,2024-09-02
+C0396,Customer 0396,SMB,Germany,emea,2025-10-11
+C0397,Customer 0397,Mid-market,United Kingdom,emea,2025-05-04
+C0398,Customer 0398,SMB,Canada,na,2026-08-23
+C0399,Customer 0399,Mid-market,Canada,na,2024-02-29
+C0400,Customer 0400,Mid-market,India,apac,2025-06-09

@@ -1,0 +1,16 @@
+project: sales-demo
+title: Sales demo
+description: Zero-setup demo project. DuckDB reads the CSV files in data/.
+default_connection: local
+currency: USD
+
+connections:
+  local:
+    duckdb:
+    tables:
+      order_lines: data/order_lines.csv
+      customers: data/customers.csv
+      products: data/products.csv
+      regions: data/regions.csv
+      calendar: data/calendar.csv
+      targets: data/targets.csv
