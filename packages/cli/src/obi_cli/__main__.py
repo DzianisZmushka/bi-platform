@@ -1,10 +1,14 @@
 """The `obi` command.
 
-    obi validate [PROJECT]
+    obi validate [PROJECT] [--execute]
+    obi catalog  [PROJECT]
     obi render   [PROJECT] [--dashboard ID] [--out DIR] [--filter ID=V1,V2] [--as-of DATE]
     obi serve    [PROJECT] [--port 8765] [--as-of DATE]
 
-Rendering always validates first; an invalid project is never rendered.
+`obi validate` is static: schemas, references, expressions, and columns from the committed
+catalog.json. It needs no data access, so it is what CI runs. `--execute` also checks
+catalog.json against the live source and runs every measure on the data. render and serve
+always validate with --execute, because they read the data anyway (ADR-008).
 """
 
 from __future__ import annotations
@@ -17,8 +21,8 @@ from pathlib import Path
 from .checks import validate_all as validate_project
 
 
-def _validate(root: Path) -> int:
-    issues = validate_project(root)
+def _validate(root: Path, execute: bool) -> int:
+    issues = validate_project(root, execute=execute)
     for issue in issues:
         print(f"{root.as_posix()}/{issue}", file=sys.stderr)
     return sum(i.severity == "error" for i in issues)
@@ -30,6 +34,11 @@ def main(argv: list[str] | None = None) -> int:
 
     v = sub.add_parser("validate", help="validate every artifact of a project")
     v.add_argument("project", nargs="?", default=".")
+    v.add_argument("--execute", action="store_true",
+                   help="also run every measure on the data and check catalog.json against it")
+
+    c = sub.add_parser("catalog", help="write catalog.json: tables and columns of the data source")
+    c.add_argument("project", nargs="?", default=".")
 
     r = sub.add_parser("render", help="render dashboards to static HTML")
     r.add_argument("project", nargs="?", default=".")
@@ -51,8 +60,17 @@ def main(argv: list[str] | None = None) -> int:
         print(f"obi: {root.as_posix()} is not a project (no project.yaml)", file=sys.stderr)
         return 2
 
+    if args.cmd == "catalog":
+        from obi_engine import Project
+        from obi_formats import catalog
+        cat = Project(root).describe()
+        path = catalog.save(root, cat)
+        cols = sum(len(c) for c in cat["tables"].values())
+        print(f"{path.as_posix()}: {len(cat['tables'])} tables, {cols} columns", file=sys.stderr)
+        return 0
+
     if args.cmd == "validate":
-        errors = _validate(root)
+        errors = _validate(root, args.execute)
         print(f"{errors} error(s)" if errors else "valid", file=sys.stderr)
         return 1 if errors else 0
 
@@ -61,7 +79,7 @@ def main(argv: list[str] | None = None) -> int:
         serve(root, args.port, args.as_of)
         return 0
 
-    errors = _validate(root)
+    errors = _validate(root, execute=True)
     if errors:
         print(f"{errors} error(s); fix them before rendering", file=sys.stderr)
         return 1

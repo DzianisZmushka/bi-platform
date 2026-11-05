@@ -26,7 +26,7 @@ def serve(root: Path, port: int, as_of: date | None):
             url = urlparse(self.path)
             did = url.path.strip("/")
             try:
-                issues = [i for i in validate_project(root) if i.severity == "error"]
+                issues = [i for i in validate_project(root, execute=True) if i.severity == "error"]
                 if issues:
                     return self._send(400, _page("Validation failed",
                                       "<ul>" + "".join(f"<li><code>{html.escape(str(i))}</code></li>"

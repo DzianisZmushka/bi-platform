@@ -10,12 +10,12 @@ Order of work:
 
 from __future__ import annotations
 
-import csv
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from . import catalog as catalog_mod
 from .artifacts import parse
 from .expr import FILTER_MEMBERS, ExprError, is_expression, parse_template
 from .modelindex import ModelIndex, Ref, RefError, did_you_mean
@@ -101,7 +101,7 @@ def validate_project(root: str | Path, overrides: dict[str, str] | None = None) 
         _check_structure(art)
 
     project = next((a for a in arts if a.type == "project"), None)
-    connection, catalog = _catalog(root, project.data if project else {})
+    connection, catalog = _catalog(root, project.data if project else {}, issues)
 
     models: dict[str, ModelIndex] = {}
     for art in (a for a in arts if a.type == "model"):
@@ -158,31 +158,25 @@ def _load(rel: str, text: str, issues: list[Issue]) -> _Artifact | None:
     return _Artifact(atype, rel, aid, doc, _Reporter(issues, rel, label, doc))
 
 
-def _catalog(root: Path, project: dict) -> tuple[str, dict[str, list[str] | None] | None]:
-    """Tables and their columns in the project's default connection, read from the files
-    themselves. A column list is None when it cannot be read (the project check reports
-    missing files)."""
+def _catalog(root: Path, project: dict, issues: list[Issue]) -> tuple[str, dict[str, list[str] | None] | None]:
+    """Columns per table for static validation. From the committed `catalog.json` when there is
+    one (no data access, as in CI); otherwise from local data files, with a warning (ADR-008)."""
     name = project.get("default_connection")
     conns = project.get("connections")
     conn = conns.get(name) if isinstance(conns, dict) and isinstance(name, str) else None
+    cached = catalog_mod.load(root)
+    if cached is not None:
+        if isinstance(conn, dict) and cached.get("connection") != name:  # a bad default is reported elsewhere
+            issues.append(Issue("warning", catalog_mod.CATALOG_FILE, 1, f"project `{root.name}`", None,
+                                f"catalog.json describes connection `{cached.get('connection')}`, not the "
+                                f"default `{name}`; run `obi catalog`"))
+        return str(name), catalog_mod.columns(cached)
     if not isinstance(conn, dict) or not isinstance(conn.get("tables"), dict):
         return str(name), None
-    catalog: dict[str, list[str] | None] = {}
-    for table, rel in conn["tables"].items():
-        path = root / str(rel)
-        catalog[table] = None
-        if not path.is_file():
-            continue
-        if path.suffix.lower() == ".csv":
-            with open(path, newline="", encoding="utf-8") as f:
-                catalog[table] = next(csv.reader(f), [])
-        elif path.suffix.lower() == ".parquet":
-            try:
-                import pyarrow.parquet as pq
-                catalog[table] = list(pq.read_schema(path).names)
-            except ImportError:
-                pass
-    return name, catalog
+    issues.append(Issue("warning", catalog_mod.CATALOG_FILE, 1, f"project `{root.name}`", None,
+                        "no catalog.json: columns were read from the data files; run `obi catalog` so "
+                        "validation needs no data access"))
+    return name, catalog_mod.from_files(root, conn)
 
 
 # =========================================================================== structure

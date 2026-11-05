@@ -1,0 +1,55 @@
+{
+  "connection": "local",
+  "tables": {
+    "order_lines": {
+      "order_id": "VARCHAR",
+      "line_no": "BIGINT",
+      "order_date": "DATE",
+      "customer_id": "VARCHAR",
+      "product_id": "VARCHAR",
+      "channel": "VARCHAR",
+      "quantity": "BIGINT",
+      "unit_price": "DOUBLE",
+      "discount": "DOUBLE",
+      "unit_cost": "DOUBLE",
+      "returned": "BOOLEAN"
+    },
+    "customers": {
+      "customer_id": "VARCHAR",
+      "customer_name": "VARCHAR",
+      "segment": "VARCHAR",
+      "country": "VARCHAR",
+      "region_id": "VARCHAR",
+      "signup_date": "DATE"
+    },
+    "products": {
+      "product_id": "VARCHAR",
+      "product_name": "VARCHAR",
+      "category": "VARCHAR",
+      "subcategory": "VARCHAR",
+      "brand": "VARCHAR",
+      "list_price": "DOUBLE",
+      "unit_cost": "DOUBLE"
+    },
+    "regions": {
+      "region_id": "VARCHAR",
+      "region_name": "VARCHAR"
+    },
+    "calendar": {
+      "date": "DATE"
+    },
+    "targets": {
+      "month": "DATE",
+      "region_id": "VARCHAR",
+      "revenue_target": "BIGINT"
+    },
+    "returns": {
+      "return_id": "VARCHAR",
+      "return_date": "DATE",
+      "order_id": "VARCHAR",
+      "line_no": "BIGINT",
+      "reason": "VARCHAR",
+      "refund_amount": "DOUBLE"
+    }
+  }
+}

@@ -50,3 +50,13 @@ Both the prefixed and the bare form of a `where:` that referenced `customers.sig
 - The LLM's model, with `returns` and `new_customer_revenue`, is the example. Its output needed `obi-formats fmt`: it had `label` after `where` and no final newline. Unlike the dashboard test, the model-edit output was not canonical on the first attempt.
 - Measures are now checked in three stages: static names, the data catalog, and a live run of each measure. Validation now reads the data files, so `obi-formats validate` needs the files present to check columns. Tables whose columns cannot be read are skipped, and the project check already reports missing files.
 - Composite-key joins remain the main gap for SAP-style sources until Phase 1.
+
+## Follow-up decisions
+
+**Static and executed validation are separate.**
+- `obi validate` is static: schemas, references, expression parsing, and columns from `catalog.json`. That file is the committed data-source catalogue, written by `obi catalog`. It holds table and column names with types, which is schema and never data, so it belongs in Git. Static validation needs no database access, and CI runs it.
+- `obi validate --execute` additionally compares `catalog.json` with the live source and runs every measure once on the data. A stale catalogue is an error naming each change ("table `returns` changed type of `refund_amount`. Run `obi catalog` and commit the result").
+- `obi serve` and `obi render` always validate with `--execute`, because they read the data anyway.
+- A project without `catalog.json` falls back to reading local data files, with a warning to run `obi catalog`.
+
+**Non-canonical input is not an error.** An LLM or a person may write keys in any order or leave out the final newline. Validation checks meaning, not layout. Every upload or commit path in Phase 1 runs `fmt` first, so what lands in Git is always canonical. `obi-formats fmt --check` stays available for CI on repositories that want to enforce it. The example README states the key order, so LLM output is canonical more often.

@@ -10,6 +10,8 @@ The full formats are in the JSON Schemas in [packages/formats/src/obi_formats/sc
 - Names, grain and filters: [ADR-005](../../docs/adr/005-references-grain-and-filter-scope.md)
 - Expressions: [expressions.md](../../docs/formats/expressions.md)
 
+**Key order** (what `obi-formats fmt` produces, so write it this way): the kind key first (`kpi: id`, `sum: ...`), then `title`/`label`/`description`, then bindings (`measure`, `x`, `y`, `rows`, `values`, `where`, `grain`, `ignore_filters`), then behaviour (`sort`, `limit`, `totals`, `on_click`, `visible`), then presentation (`format`, `color`, `cells`), and `items` last.
+
 ## Model (`model/*.model.yaml`)
 
 | Element | Shape |

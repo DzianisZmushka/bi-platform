@@ -10,7 +10,9 @@ Python 3.12 and every dependency are managed with [uv](https://docs.astral.sh/uv
 
 ```bash
 uv sync                      # create .venv with Python 3.12 and install all workspace packages
-uv run obi validate examples/sales-demo           # validate a project
+uv run obi validate examples/sales-demo           # static: no data access (CI)
+uv run obi validate examples/sales-demo --execute # also run every measure on the data
+uv run obi catalog examples/sales-demo            # refresh catalog.json from the data source
 uv run obi render examples/sales-demo             # write .obi/render/<dashboard>.html
 uv run obi render examples/sales-demo -f channel=Online -f period=last_year
 uv run obi serve examples/sales-demo              # http://127.0.0.1:8765, live filters

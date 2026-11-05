@@ -89,8 +89,41 @@ def test_database_errors_become_file_line_issues(project, capsys):
     m = project / "model/sales.model.yaml"
     m.write_text(m.read_text(encoding="utf-8").replace("units: { sum: quantity,", "units: { sum: year(channel),"),
                  encoding="utf-8")
-    assert main(["validate", str(project)]) == 1
+    assert main(["validate", str(project)]) == 0  # static validation does not touch the data
+    capsys.readouterr()
+    assert main(["validate", str(project), "--execute"]) == 1
     err = capsys.readouterr().err
     assert re.search(r"model/sales\.model\.yaml:\d+: error: model `sales`, measure `units`: "
                      r"function `year` cannot be used on text values", err)
     assert "Binder" not in err and "VARCHAR" not in err
+
+
+
+def test_static_validation_reads_columns_from_the_catalogue(project, capsys):
+    """CI runs `obi validate` without data access: columns come from catalog.json."""
+    import json
+    cat = json.loads((project / "catalog.json").read_text(encoding="utf-8"))
+    del cat["tables"]["returns"]["refund_amount"]          # the CSV still has it
+    (project / "catalog.json").write_text(json.dumps(cat), encoding="utf-8")
+    assert main(["validate", str(project)]) == 1
+    assert "column `refund_amount` not found in table `returns`" in capsys.readouterr().err
+
+
+def test_execute_reports_a_stale_catalogue(project, capsys):
+    import json
+    cat = json.loads((project / "catalog.json").read_text(encoding="utf-8"))
+    cat["tables"]["returns"]["refund_amount"] = "VARCHAR"
+    (project / "catalog.json").write_text(json.dumps(cat), encoding="utf-8")
+    assert main(["validate", str(project)]) == 0
+    capsys.readouterr()
+    assert main(["validate", str(project), "--execute"]) == 1
+    assert ("catalog.json is out of date: table `returns` changed type of `refund_amount`. "
+            "Run `obi catalog` and commit the result") in capsys.readouterr().err
+    assert main(["catalog", str(project)]) == 0
+    assert main(["validate", str(project), "--execute"]) == 0
+
+
+def test_without_a_catalogue_columns_come_from_files_with_a_warning(project, capsys):
+    (project / "catalog.json").unlink()
+    assert main(["validate", str(project)]) == 0
+    assert "warning: project `sales-demo`: no catalog.json" in capsys.readouterr().err

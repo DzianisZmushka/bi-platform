@@ -1,8 +1,11 @@
-"""Full project validation for the CLI: static checks, then a run of every measure.
+"""Project validation for the CLI (ADR-008).
 
-The static validator (obi_formats) resolves every name. Running each measure once on the
-data catches what static checks cannot, such as `year()` applied to a text column, and
-reports it as file:line naming the measure, never as a raw database error (ADR-008).
+Static (default): obi_formats resolves every name and reads columns from catalog.json.
+No data access, so CI can run it.
+
+--execute: additionally compares catalog.json with the live source and runs every measure
+once on the data. That catches what static checks cannot, such as `year()` applied to a
+text column, and reports it as file:line naming the measure, never as a raw database error.
 """
 
 from __future__ import annotations
@@ -10,20 +13,28 @@ from __future__ import annotations
 from pathlib import Path
 
 from obi_engine import EngineError, Project
+from obi_formats import catalog as catalog_mod
 from obi_formats.artifacts import parse
 from obi_formats.validate import Issue, validate_project
 
 
-def validate_all(root: str | Path) -> list[Issue]:
+def validate_all(root: str | Path, execute: bool = False) -> list[Issue]:
     root = Path(root)
     issues = validate_project(root)
-    if any(i.severity == "error" for i in issues):
+    if not execute or any(i.severity == "error" for i in issues):
         return issues  # running measures on a model with known errors only repeats them
     try:
         project = Project(root)
     except Exception as e:  # a data file DuckDB cannot read
         return issues + [Issue("error", "project.yaml", 1, f"project `{root.name}`", None,
                                f"the data could not be loaded: {_short(e)}")]
+    cached = catalog_mod.load(root)
+    if cached is not None:
+        changes = catalog_mod.drift(cached, project.describe())
+        if changes:
+            issues.append(Issue("error", catalog_mod.CATALOG_FILE, 1, f"project `{root.name}`", None,
+                                "catalog.json is out of date: " + "; ".join(changes)
+                                + ". Run `obi catalog` and commit the result"))
     for path in sorted(root.glob("model/*.model.yaml")):
         rel = path.relative_to(root).as_posix()
         doc = parse(path.read_text(encoding="utf-8"))

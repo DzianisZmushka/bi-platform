@@ -100,6 +100,15 @@ class Project:
             self.con.execute(f"CREATE TABLE {_q(table)} AS SELECT * FROM {reader}('{path}')")
         self._models: dict[str, Engine] = {}
 
+    def describe(self) -> dict:
+        """The live catalogue of the default connection: table -> column -> type."""
+        conn = self.config["connections"][self.config["default_connection"]]
+        tables = {}
+        for table in conn.get("tables") or {}:
+            rows = self.con.sql(f"DESCRIBE {_q(table)}").fetchall()
+            tables[table] = {r[0]: r[1] for r in rows}
+        return {"connection": self.config["default_connection"], "tables": tables}
+
     def engine(self, model: str) -> "Engine":
         if model not in self._models:
             path = self.root / "model" / f"{model}.model.yaml"
