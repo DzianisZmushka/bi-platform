@@ -14,7 +14,7 @@ import sys
 from datetime import date
 from pathlib import Path
 
-from obi_formats.validate import validate_project
+from .checks import validate_all as validate_project
 
 
 def _validate(root: Path) -> int:

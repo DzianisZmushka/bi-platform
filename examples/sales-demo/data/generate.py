@@ -126,6 +126,26 @@ def main():
             targets.append((d.isoformat(), region, int(round(base, -3))))
     write("targets", ["month", "region_id", "revenue_target"], targets)
 
+    # Returns: one row per returned order line. A separate generator keeps every file
+    # above byte-identical to what it was before returns existed.
+    rr = random.Random(20261106)
+    reasons = [("Damaged in transit", 3), ("Wrong item", 2), ("Not as described", 2),
+               ("No longer needed", 3), ("Defective", 2)]
+    returns = []
+    for order_id, line_no, d, _, _, _, qty, price, discount, _, returned in lines:
+        if returned != "true":
+            continue
+        ordered = date.fromisoformat(d)
+        returned_on = ordered + timedelta(days=rr.randint(3, 30))
+        if returned_on > END:
+            continue  # the return has not happened yet at the end of the data
+        net = qty * price * (1 - discount)
+        # Rounded down to cents, so a refund never exceeds the line's net revenue.
+        refund = math.floor(net * rr.choice([1.0, 1.0, 1.0, 0.9, 0.75]) * 100) / 100
+        reason = rr.choices([r for r, _ in reasons], weights=[w for _, w in reasons])[0]
+        returns.append((f"R{len(returns) + 1:06d}", returned_on.isoformat(), order_id, line_no, reason, refund))
+    write("returns", ["return_id", "return_date", "order_id", "line_no", "reason", "refund_amount"], returns)
+
 
 if __name__ == "__main__":
     main()

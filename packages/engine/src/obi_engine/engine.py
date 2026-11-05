@@ -14,12 +14,15 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
+import re
+
 import duckdb
 import pyarrow as pa
 import sqlglot
 from sqlglot import exp
 
 from obi_formats.artifacts import parse
+from obi_formats.colexpr import ColExprError, parse as parse_colexpr, references
 from obi_formats.modelindex import MEASURE_KINDS, Field, ModelIndex, Ref, RefError
 
 AGG_SQL = {"sum": "SUM({})", "count": "COUNT({})", "count_distinct": "COUNT(DISTINCT {})",
@@ -112,7 +115,26 @@ class Engine:
     # ------------------------------------------------------------------ public
 
     def query(self, q: SemanticQuery) -> pa.Table:
-        return self.con.sql(self.sql(q)).to_arrow_table()
+        sql = self.sql(q)
+        try:
+            return self.con.sql(sql).to_arrow_table()
+        except duckdb.Error as e:  # never surface a raw database error (ADR-008)
+            raise EngineError(translate_db_error(e)) from None
+
+    def check_measures(self) -> list[tuple[Field, str]]:
+        """Run every measure once against the data (no rows returned) and report the ones
+        the database cannot compute. `obi validate` maps these to file:line."""
+        problems = []
+        for f in self.idx.fields():
+            if f.kind != "measure":
+                continue
+            try:
+                self.con.sql(self.sql(SemanticQuery([f.qualified], limit=1))).fetchall()
+            except EngineError as e:
+                problems.append((f, e.args[0]))
+            except duckdb.Error as e:
+                problems.append((f, translate_db_error(e)))
+        return problems
 
     def distinct(self, dimension: str, limit: int = 500) -> list:
         ref = self._dim(dimension)
@@ -205,7 +227,7 @@ class Engine:
             if isinstance(node, exp.Column):
                 text = ".".join(p for p in (node.table, node.name) if p)
                 inner = self._measure_expr(self._resolve(text, ("measure",)).field, base, stack + (f,))
-                return exp.Paren(this=sqlglot.parse_one(inner, read="duckdb"))
+                return exp.Paren(this=sqlglot.parse_one(inner, read="duckdb"))  # inner is our own SQL
             for key, child in list(node.args.items()):
                 if isinstance(child, exp.Expression):
                     node.set(key, rewrite(child))
@@ -215,7 +237,7 @@ class Engine:
                 node.set("expression", exp.Nullif(this=node.expression, expression=exp.Literal.number(0)))
             return node
 
-        return rewrite(sqlglot.parse_one(f.spec["calc"])).sql("duckdb")
+        return rewrite(_checked(f.spec["calc"], f, "calc")).sql("duckdb")
 
     def _fact_cte(self, fact: str, measures: list[Field], base: dict, dims: list[Ref],
                   names: list[str], filters: list) -> str:
@@ -245,10 +267,10 @@ class Engine:
             select.append(f"{col} AS {_q(name)}")
         for m in measures:
             kind = next(k for k in MEASURE_KINDS if k in m.spec)
-            expr = _qualify(m.spec[kind], "t0")
+            expr = _qualify(_checked(m.spec[kind], m, kind), "t0")
             agg = AGG_SQL[kind].format(expr)
             if m.spec.get("where"):
-                agg += f" FILTER (WHERE {_qualify(m.spec['where'], 't0')})"
+                agg += f" FILTER (WHERE {self._where_sql(m, alias_of)})"
             if kind in DOUBLE_AGGS:
                 agg = f"CAST({agg} AS DOUBLE)"
             select.append(f"{agg} AS {_q(base[m])}")
@@ -271,6 +293,19 @@ class Engine:
             sql += " GROUP BY " + ", ".join(str(i + 1) for i in range(len(dims)))
         return sql
 
+    def _where_sql(self, m: Field, alias_of) -> str:
+        """`where:` names model dimensions (ADR-008): each is resolved and joined like a
+        chart axis, so a filtered measure can use attributes of joined entities."""
+        tree = _checked(m.spec["where"], m, "where")
+        for text, col in references(tree):
+            r = self._resolve(text, ("dimension",))
+            sql = f"{alias_of(r.field.entity, f'dimension `{text}` in the `where` of measure `{m.name}`')}" \
+                  f".{_q(self._column(r.field))}"
+            if r.grain and r.grain != "day":
+                sql = f"CAST(date_trunc('{r.grain}', {sql}) AS DATE)"
+            col.replace(sqlglot.parse_one(sql, read="duckdb"))
+        return tree.sql("duckdb")
+
     def _path(self, start: str, target: str):
         """The single join path from `start` to `target` (ADR-001), as (src, dst, fk) steps."""
         todo = [(start, [])]
@@ -286,8 +321,39 @@ class Engine:
         return None
 
 
-def _qualify(expr: str, alias: str) -> str:
-    tree = sqlglot.parse_one(expr)
+def _checked(text: str, m: Field, key: str) -> exp.Expression:
+    try:
+        return parse_colexpr(text)
+    except ColExprError as e:
+        raise EngineError(f"measure `{m.name}`, `{key}`: {e.message}") from None
+
+
+_TYPE_WORDS = {"VARCHAR": "text", "BIGINT": "number", "INTEGER": "number", "DOUBLE": "number",
+               "DECIMAL": "number", "HUGEINT": "number", "DATE": "date", "TIMESTAMP": "date-time",
+               "BOOLEAN": "true/false"}
+
+
+def translate_db_error(e: Exception) -> str:
+    """A database error in model terms. The validator should have caught the cause first;
+    this is the last line of defence, so it never passes database jargon through."""
+    msg = str(e).splitlines()[0]
+    msg = re.sub(r"^[A-Za-z ]*(Error|Exception): ", "", msg).strip()
+    if m := re.search(r'Referenced column "([^"]+)" not found', msg):
+        return f"column `{m.group(1)}` does not exist in the data"
+    if m := re.search(r'Referenced table "?([^"!]+?)"? not found', msg):
+        return f"table `{m.group(1)}` is not available to this query"
+    if m := re.search(r"No function matches the given name and argument types '(\w+)\(([^)]*)\)'", msg):
+        types = ", ".join(dict.fromkeys(_TYPE_WORDS.get(x.strip().upper(), x.strip().lower())
+                                        for x in m.group(2).split(",") if x.strip()))
+        return f"function `{m.group(1).lower()}` cannot be used on {types or 'these'} values"
+    if m := re.search(r"Could not convert string '([^']*)' to (\w+)", msg):
+        return f"the value `{m.group(1)}` cannot be read as {m.group(2).lower()}"
+    if "Conversion Error" in str(e) or "Cannot compare" in msg or "Cannot mix" in msg:
+        return "values of different types are compared or combined; check the column types"
+    return "the database could not compute this; run `obi validate` for details"
+
+
+def _qualify(tree: exp.Expression, alias: str) -> str:
     for col in tree.find_all(exp.Column):
         if not col.table:
             col.set("table", exp.to_identifier(alias))

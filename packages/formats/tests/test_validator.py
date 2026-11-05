@@ -85,6 +85,7 @@ def test_model_two_join_paths():
     assert messages(o, MODEL) == [
         "model `sales`, entity `order_lines`: reaches `regions` through two join paths: "
         "order_lines → customers → regions and order_lines → regions; keep exactly one (ADR-001)",
+        "model `sales`, entity `order_lines`: column `region_id` not found in table `order_lines`",
     ]
 
 
@@ -231,3 +232,76 @@ def test_unknown_chart_axis_reports_only_the_name():
     o = edit(OVERVIEW, "            y: net_revenue\n            series: channel",
              "            y: segment\n            series: channel")
     assert messages(o) == ["dashboard `revenue-overview`, widget `revenue_trend`: a chart needs a measure on `x` or `y`"]
+
+
+# --------------------------------------------------------------------------- column expressions (ADR-008)
+
+
+def test_where_uses_dimensions_not_raw_columns():
+    o = edit(MODEL, "where: year(signup_date) = year(date)", "where: year(signup_date) = year(order_date)")
+    assert messages(o, MODEL) == [
+        "model `sales`, measure `new_customer_revenue`: `where`: `order_date` is not a model dimension; "
+        "`order_date` is the join column to `calendar`, so use its dimension `date`",
+    ]
+    o = edit(MODEL, "where: year(signup_date) = year(date)", "where: segmnt = 'SMB'")
+    assert messages(o, MODEL) == [
+        "model `sales`, measure `new_customer_revenue`: `where`: dimension `segmnt` not found in model "
+        "`sales`; did you mean `segment`?",
+    ]
+
+
+def test_where_dimension_must_be_reachable():
+    o = edit(MODEL, "      refunds: { sum: refund_amount, format: currency }",
+             "      refunds: { sum: refund_amount, where: segment = 'SMB', format: currency }")
+    assert messages(o, MODEL) == [
+        "model `sales`, measure `refunds`: `where`: dimension `segment` is not reachable from entity "
+        "`returns` through its joins",
+    ]
+
+
+def test_unsupported_function_and_prefixed_aggregation():
+    o = edit(MODEL, "where: year(signup_date) = year(date)", "where: upper(segment) = 'SMB'")
+    assert messages(o, MODEL) == [
+        "model `sales`, measure `new_customer_revenue`: `where`: function `upper` is not supported in column "
+        "expressions; use year, month, quarter, date_diff, coalesce, case, arithmetic, comparisons and "
+        "and/or/not",
+    ]
+    o = edit(MODEL, "units: { sum: quantity, format: integer }",
+             "units: { sum: products.list_price, format: integer }")
+    assert messages(o, MODEL) == [
+        "model `sales`, measure `units`: `sum` uses `products.list_price`: aggregations read columns of the "
+        "entity's own table only; to filter on a joined dimension use `where:`",
+    ]
+
+
+def test_composite_key_join_is_not_supported_yet():
+    o = edit(MODEL, "    joins: { calendar: return_date }",
+             "    joins:\n      calendar: return_date\n      order_lines: [order_id, line_no]")
+    assert messages(o, MODEL) == [
+        "model `sales`, entity `returns`: joins on several columns (order_id, line_no) are not supported "
+        "yet; composite-key joins are planned for Phase 1 (ADR-008)",
+    ]
+
+
+def test_tables_and_columns_must_exist_in_the_data():
+    o = edit(MODEL, "    table: returns\n", "    table: return_lines\n")
+    assert messages(o, MODEL) == [
+        "model `sales`, entity `returns`: table `return_lines` not found in connection `local`; did you mean "
+        "`order_lines`? If it is new, add it under `tables` in project.yaml.",
+    ]
+    o = edit(MODEL, "refunds: { sum: refund_amount,", "refunds: { sum: refund_amt,")
+    assert messages(o, MODEL) == [
+        "model `sales`, measure `refunds`: column `refund_amt` not found in table `returns`; "
+        "did you mean `refund_amount`?",
+    ]
+    o = edit(MODEL, "      reason: { label: Return reason }", "      reasons: { label: Return reason }")
+    assert "model `sales`, dimension `reasons`: column `reasons` not found in table `returns`; " \
+           "did you mean `reason`?" in messages(o, MODEL)
+
+
+def test_model_pasted_into_a_dashboard_file_gives_one_error():
+    model_text = (DEMO / MODEL).read_text(encoding="utf-8")
+    assert messages({OVERVIEW: model_text}) == [
+        "dashboard `revenue-overview`: this file looks like a model, not a dashboard (it has `entities` or "
+        "`hierarchies`); models live in `model/<id>.model.yaml`",
+    ]

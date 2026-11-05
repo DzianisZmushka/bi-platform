@@ -11,3 +11,4 @@ Short records: context, decision, consequences. A record is never edited after a
 | [005](005-references-grain-and-filter-scope.md) | References, grain and filter scope | Accepted |
 | [006](006-serializer-and-comment-preservation.md) | Serializer and comment preservation | Accepted |
 | [007](007-phase-0-renderer.md) | Phase 0 renderer: server-side HTML from the CLI | Accepted |
+| [008](008-findings-of-the-llm-model-edit-test.md) | Findings of the LLM model-edit test | Accepted |

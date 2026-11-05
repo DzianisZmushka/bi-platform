@@ -14,7 +14,8 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from obi_formats.artifacts import parse
-from obi_formats.validate import validate_project
+
+from .checks import validate_all as validate_project
 
 from .render import dashboard_ids, filter_ids, render_dashboard
 

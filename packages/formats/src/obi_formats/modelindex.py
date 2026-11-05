@@ -8,8 +8,7 @@ from dataclasses import dataclass
 from dataclasses import field as dc_field
 from typing import Callable
 
-import sqlglot
-from sqlglot import exp
+from .colexpr import ColExprError, parse as parse_colexpr, references
 
 TIME_GRAINS = ("day", "week", "month", "quarter", "year")
 _GRAIN_RANK = {None: 0, "day": 1, "week": 2, "month": 3, "quarter": 4, "year": 5}
@@ -175,8 +174,17 @@ class ModelIndex:
     # ------------------------------------------------------------------ joins and grain
 
     def joins(self, entity: str) -> dict[str, str]:
+        """Usable joins: single-column foreign key to an entity with a single-column key.
+        Composite-key joins are not supported yet (ADR-008) and stay out of the join graph."""
         j = self.entities.get(entity, {}).get("joins")
-        return {t: c for t, c in j.items() if t in self.entities} if isinstance(j, dict) else {}
+        if not isinstance(j, dict):
+            return {}
+        return {t: c for t, c in j.items()
+                if t in self.entities and isinstance(c, str) and not self._composite_key(t)}
+
+    def _composite_key(self, entity: str) -> bool:
+        key = self.entities[entity].get("key")
+        return isinstance(key, list) and len(key) > 1
 
     def reachable(self, entity: str) -> list[str]:
         seen, todo = [entity], [entity]
@@ -241,11 +249,19 @@ class ModelIndex:
         return ", ".join(parts) or "none"
 
     def calc_refs(self, f: Field) -> list[str]:
-        try:
-            tree = sqlglot.parse_one(f.spec["calc"])
-        except Exception:
+        return self._refs(f.spec.get("calc"))
+
+    def where_refs(self, f: Field) -> list[str]:
+        return self._refs(f.spec.get("where"))
+
+    @staticmethod
+    def _refs(text) -> list[str]:
+        if not isinstance(text, str):
             return []
-        return [".".join(p for p in (c.table, c.name) if p) for c in tree.find_all(exp.Column)]
+        try:
+            return [r for r, _ in references(parse_colexpr(text))]
+        except ColExprError:
+            return []
 
     # ------------------------------------------------------------------ checks
 
@@ -280,13 +296,21 @@ class ModelIndex:
             report(path + (kinds[1],), label,
                    f"has both `{kinds[0]}` and `{kinds[1]}`; keep exactly one")
         for key in (kinds[0], "where"):
-            if isinstance(f.spec.get(key), str):
-                try:
-                    sqlglot.parse_one(f.spec[key])
-                except Exception as e:
-                    first = str(e).splitlines()[0]
-                    report(path + (key,), label, f"`{key}` is not a valid SQL expression: {first}")
-                    return
+            if not isinstance(f.spec.get(key), str):
+                continue
+            try:
+                tree = parse_colexpr(f.spec[key])
+            except ColExprError as e:
+                report(path + (key,), label, f"`{key}`: {e.message}")
+                return
+            if key == "where":
+                self._check_where(f, tree, path, label, report)
+            elif key != "calc":
+                for text, _ in references(tree):
+                    if "." in text:
+                        report(path + (key,), label,
+                               f"`{key}` uses `{text}`: aggregations read columns of the entity's own table "
+                               f"only; to filter on a joined dimension use `where:`")
         if kinds[0] == "calc":
             for r in self.calc_refs(f):
                 try:
@@ -299,6 +323,35 @@ class ModelIndex:
                        "calc refers to itself: " + " → ".join(c.name for c in cycle))
         if isinstance(f.spec.get("grain"), list):
             self._check_grain_list(f.entity, f.spec["grain"], path + ("grain",), label, report)
+
+    def _check_where(self, f: Field, tree, path: tuple, label: str, report: Report):
+        """`where:` names model dimensions, resolved through joins like chart axes (ADR-008)."""
+        reach = self.reachable(f.entity)
+        for text, _ in references(tree):
+            try:
+                r = self.resolve(text, ("dimension",))
+            except RefError as e:
+                hint = self._join_column_hint(f.entity, text)
+                msg = f"`{text}` is not a model dimension; {hint}" if hint else e.message
+                report(path + ("where",), label, f"`where`: {msg}")
+                continue
+            if r.field.entity not in reach:
+                report(path + ("where",), label,
+                       f"`where`: dimension `{text}` is not reachable from entity `{f.entity}` through its joins")
+
+    def _join_column_hint(self, entity: str, text: str) -> str | None:
+        """`order_date` in `where:` usually means the dimension the join column leads to."""
+        joins = self.entities.get(entity, {}).get("joins")
+        if not isinstance(joins, dict):
+            return None
+        for target, fk in joins.items():
+            if fk == text and target in self.entities:
+                key = self.entities[target].get("key")
+                for f in self.fields(target):
+                    if f.kind == "dimension" and f.spec.get("column", f.name) == key:
+                        return f"`{text}` is the join column to `{target}`, so use its dimension `{f.name}`"
+                return f"`{text}` is the join column to `{target}`; use a dimension of `{target}`"
+        return None
 
     def _calc_cycle(self, f: Field, stack: tuple):
         for r in self.calc_refs(f):
@@ -330,16 +383,65 @@ class ModelIndex:
         joins = e.get("joins")
         if not isinstance(joins, dict):
             return
-        for target in joins:
+        for target, fk in joins.items():
             path = ("entities", en, "joins", target)
             if target not in self.entities:
                 report(path, f"entity `{en}`",
                        f"joins unknown entity `{target}`" + did_you_mean(target, self.entities))
                 continue
             key = self.entities[target].get("key")
-            if isinstance(key, list) and len(key) > 1:
+            if isinstance(fk, list):
                 report(path, f"entity `{en}`",
-                       f"cannot join to `{target}`: its key has several columns ({', '.join(key)})")
+                       f"joins on several columns ({', '.join(map(str, fk))}) are not supported yet; "
+                       f"composite-key joins are planned for Phase 1 (ADR-008)")
+            elif isinstance(key, list) and len(key) > 1:
+                report(path, f"entity `{en}`",
+                       f"joining to `{target}` is not supported yet: its key has several columns "
+                       f"({', '.join(key)}); composite-key joins are planned for Phase 1 (ADR-008)")
+
+    # ------------------------------------------------------------------ data source
+
+    def check_catalog(self, catalog: dict, connection: str, report: Report):
+        """Tables and columns the model names must exist in the data source.
+        `catalog` maps table -> list of columns, or None when the columns cannot be read."""
+        for en, e in self.entities.items():
+            table = e.get("table")
+            if not isinstance(table, str):
+                continue
+            if table not in catalog:
+                report(("entities", en, "table"), f"entity `{en}`",
+                       f"table `{table}` not found in connection `{connection}`"
+                       + did_you_mean(table, catalog) + " If it is new, add it under `tables` in project.yaml.")
+                continue
+            cols = catalog[table]
+            if cols is None:
+                continue
+
+            def need(column, path, label):
+                if isinstance(column, str) and column not in cols:
+                    report(path, label, f"column `{column}` not found in table `{table}`"
+                           + did_you_mean(column, cols))
+
+            key = e.get("key")
+            for k in key if isinstance(key, list) else [key]:
+                need(k, ("entities", en, "key"), f"entity `{en}`")
+            for target, fk in (e.get("joins") or {}).items() if isinstance(e.get("joins"), dict) else []:
+                for c in fk if isinstance(fk, list) else [fk]:
+                    need(c, ("entities", en, "joins", target), f"entity `{en}`")
+            for f in self.fields(en):
+                if f.kind == "dimension":
+                    need(f.spec.get("column", f.name), ("entities", en, "dimensions", f.name),
+                         f"dimension `{f.name}`")
+                    continue
+                kind = next((k for k in MEASURE_KINDS if k in f.spec), None)
+                if kind and kind != "calc" and isinstance(f.spec[kind], str):
+                    try:
+                        tree = parse_colexpr(f.spec[kind])
+                    except ColExprError:
+                        continue  # reported by the measure check
+                    for text, _ in references(tree):
+                        if "." not in text:
+                            need(text, ("entities", en, "measures", f.name, kind), f"measure `{f.name}`")
 
     def _check_paths(self, report: Report):
         reported = set()

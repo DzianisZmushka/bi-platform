@@ -14,9 +14,9 @@ The full formats are in the JSON Schemas in [packages/formats/src/obi_formats/sc
 
 | Element | Shape |
 |---|---|
-| entity | `table`, `key`, `grain` (optional), `joins: { <entity>: <fk column> }` (many-to-one), `dimensions`, `measures` |
+| entity | `table`, `key`, `grain` (optional), `joins: { <entity>: <fk column> }` (many-to-one, single column; joins on several columns are not supported yet), `dimensions`, `measures`. The table and every column must exist in the data: the validator reads them |
 | dimension | `<name>:` with optional `{ label, column, type: string\|number\|date\|boolean }` |
-| measure | aggregation as the key: `sum` / `count` / `count_distinct` / `avg` / `min` / `max: <column expr>`, plus optional `where: <boolean column expr>`, or `calc: <expression over measures>`. Other keys: `label`, `grain`, `format: currency\|percent\|integer\|number` |
+| measure | aggregation as the key: `sum` / `count` / `count_distinct` / `avg` / `min` / `max: <expression over columns of the entity's own table>`, plus optional `where: <condition over model dimensions>`, or `calc: <expression over measures>`. `where:` names dimensions, bare or prefixed, from any entity reachable through joins (`segment = 'Enterprise'`, `year(signup_date) = year(date)`), never raw columns. Allowed functions: [expressions.md](../../docs/formats/expressions.md#column-expressions-in-models). Other keys: `label`, `grain`, `format: currency\|percent\|integer\|number` |
 | hierarchy | `<name>: [level, level, ...]`. Usable wherever a dimension is. In `obi serve`, clicking a bar or row drills down one level, and a breadcrumb leads back. Static renders show the top level |
 
 **Names.** Fields are referenced by bare name (`segment`). An entity prefix (`customers.segment`) is always allowed and is required only when the bare name is ambiguous. Date dimensions take a grain suffix: `date.month`.

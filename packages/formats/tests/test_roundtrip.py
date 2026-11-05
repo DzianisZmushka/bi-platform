@@ -268,3 +268,21 @@ def test_y_key_stays_plain():
     assert "        y: net_revenue\n" in out and '"y"' not in out
     # Values are not exempt: a string value `y` must still be quoted.
     assert canon(src.replace("x: region", "title: y")).count('title: "y"') == 1
+
+
+def test_comments_on_list_valued_join_move_with_it():
+    """CLAUDE.md: a new property shape (a join on several columns) ships with a comment test."""
+    src = """\
+model: m
+entities:
+  returns:
+    table: returns
+    key: return_id
+    joins:
+      # composite key, not supported yet
+      order_lines: [order_id, line_no]  # VBELN + POSNR style
+      calendar: return_date
+"""
+    out = canon(src, "model")
+    assert "    joins:\n      # composite key, not supported yet\n" \
+           "      order_lines: [order_id, line_no]  # VBELN + POSNR style\n" in out

@@ -79,7 +79,7 @@ project/
 **Phase 0 — prove the loop (weeks, not months).**
 Model format + dashboard format + JSON Schemas + canonical serializer + validator + CLI (`validate`, `render`). Renderer that draws a dashboard from YAML on DuckDB over local Parquet/CSV. No builder, no auth, no scheduler. Success test: take a sample dashboard, send the YAML to an LLM, paste back the result, `validate`, render, see the change.
 
-**Phase 1 — runtime.** Web app, Git-backed projects, deploy from branch, Postgres backend, roles/RLS, cross-filtering, navigation between dashboards, themes.
+**Phase 1 — runtime.** Web app, Git-backed projects, deploy from branch, Postgres backend, roles/RLS, cross-filtering, navigation between dashboards, themes, composite-key joins (ADR-008; SAP keys such as VBELN+POSNR and BELNR+BUZEI need them).
 
 **Phase 2 — forms (write-back).** Writable entities, DDL management, audit/history, form artifact + renderer. This is the first major differentiator; ship before builders.
 

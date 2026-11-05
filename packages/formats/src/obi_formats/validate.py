@@ -10,6 +10,7 @@ Order of work:
 
 from __future__ import annotations
 
+import csv
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -99,6 +100,9 @@ def validate_project(root: str | Path, overrides: dict[str, str] | None = None) 
     for art in arts:
         _check_structure(art)
 
+    project = next((a for a in arts if a.type == "project"), None)
+    connection, catalog = _catalog(root, project.data if project else {})
+
     models: dict[str, ModelIndex] = {}
     for art in (a for a in arts if a.type == "model"):
         stem = Path(art.file).name.removesuffix(".model.yaml")
@@ -107,18 +111,24 @@ def validate_project(root: str | Path, overrides: dict[str, str] | None = None) 
                                           f"`{stem}.model.yaml`; rename one of them")
         idx = ModelIndex(art.id, art.data)
         idx.check(art.report)
+        if catalog is not None:
+            idx.check_catalog(catalog, connection, art.report)
         models[art.id] = idx
 
     for art in (a for a in arts if a.type == "project"):
         _check_project(art, root)
 
     dashboards = {a.id: a.data for a in arts if a.type == "dashboard"}
+    # Dashboards whose file did not load already have their own error; links to them are
+    # not reported again.
+    loaded = {a.file for a in arts}
+    broken = {Path(r).parent.name for r in rels if artifact_type(r) == "dashboard" and r not in loaded}
     for art in (a for a in arts if a.type == "dashboard"):
         folder = Path(art.file).parent.name
         if art.id != folder:
             art.report(("dashboard",), None, f"dashboard id `{art.id}` does not match its folder "
                                               f"`{folder}`; rename one of them")
-        _DashboardCheck(art, models, dashboards).run()
+        _DashboardCheck(art, models, dashboards, broken).run()
 
     return sorted(issues, key=lambda i: (i.file, i.line or 0))
 
@@ -137,9 +147,42 @@ def _load(rel: str, text: str, issues: list[Issue]) -> _Artifact | None:
         issues.append(Issue("error", rel, 1, f"{atype} `{fallback}`", None,
                             f"the file must be a mapping that starts with `{atype}: <id>`"))
         return None
+    if atype == "dashboard" and ("entities" in data or "hierarchies" in data) and "pages" not in data:
+        # One clear error instead of a list of unknown and missing properties.
+        issues.append(Issue("error", rel, 1, f"dashboard `{fallback}`", None,
+                            "this file looks like a model, not a dashboard (it has `entities` or "
+                            "`hierarchies`); models live in `model/<id>.model.yaml`"))
+        return None
     aid = data.get(atype) if isinstance(data.get(atype), str) else fallback
     label = f"{atype} `{aid}`"
     return _Artifact(atype, rel, aid, doc, _Reporter(issues, rel, label, doc))
+
+
+def _catalog(root: Path, project: dict) -> tuple[str, dict[str, list[str] | None] | None]:
+    """Tables and their columns in the project's default connection, read from the files
+    themselves. A column list is None when it cannot be read (the project check reports
+    missing files)."""
+    name = project.get("default_connection")
+    conns = project.get("connections")
+    conn = conns.get(name) if isinstance(conns, dict) and isinstance(name, str) else None
+    if not isinstance(conn, dict) or not isinstance(conn.get("tables"), dict):
+        return str(name), None
+    catalog: dict[str, list[str] | None] = {}
+    for table, rel in conn["tables"].items():
+        path = root / str(rel)
+        catalog[table] = None
+        if not path.is_file():
+            continue
+        if path.suffix.lower() == ".csv":
+            with open(path, newline="", encoding="utf-8") as f:
+                catalog[table] = next(csv.reader(f), [])
+        elif path.suffix.lower() == ".parquet":
+            try:
+                import pyarrow.parquet as pq
+                catalog[table] = list(pq.read_schema(path).names)
+            except ImportError:
+                pass
+    return name, catalog
 
 
 # =========================================================================== structure
@@ -346,9 +389,10 @@ _CONTAINERS = ("row", "grid", "tabs", "tab", "card", "section")
 
 
 class _DashboardCheck:
-    def __init__(self, art: _Artifact, models: dict[str, ModelIndex], dashboards: dict[str, Any]):
+    def __init__(self, art: _Artifact, models: dict[str, ModelIndex], dashboards: dict[str, Any],
+                 broken: set[str] = frozenset()):
         self.art, self.d, self.report = art, art.data, art.report
-        self.dashboards = dashboards
+        self.dashboards, self.broken = dashboards, broken
         model = self.d.get("model")
         self.idx = models.get(model) if isinstance(model, str) else None
         if isinstance(model, str) and self.idx is None:
@@ -567,6 +611,8 @@ class _DashboardCheck:
         if isinstance(nav, str) and "/" in nav:
             did, pid = nav.split("/", 1)
             other = self.dashboards.get(did)
+            if other is None and did in self.broken:
+                return
             if other is None:
                 self.report(path + ("navigate",), label, f"`on_click`: no dashboard `{did}` in this project"
                             + did_you_mean(did, self.dashboards))

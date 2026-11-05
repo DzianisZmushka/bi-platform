@@ -44,9 +44,12 @@
         },
         "joins": {
           "type": "object",
-          "description": "Many-to-one joins: <target entity>: <foreign key column of this entity>.",
+          "description": "Many-to-one joins: <target entity>: <foreign key column of this entity>. A list of columns (composite key) is accepted by the schema so the validator can report it as not supported yet (ADR-008).",
           "propertyNames": { "$ref": "#/$defs/id" },
-          "additionalProperties": { "type": "string", "minLength": 1 }
+          "additionalProperties": {
+            "type": ["string", "array"], "minLength": 1, "minItems": 2,
+            "items": { "type": "string", "minLength": 1 }
+          }
         },
         "dimensions": {
           "type": "object",

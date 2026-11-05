@@ -137,3 +137,17 @@ def test_descriptions_are_rendered(tmp_path):
     html = render_dashboard(dst, "revenue-overview", None, AS_OF).html
     assert '<p class="desc">Page note.</p>' in html
     assert 'class="info" title="Ranked by net revenue."' in html
+
+
+def test_every_expression_feature_has_a_duckdb_test():
+    """ADR-008: every syntactic feature the column-expression parser accepts runs on DuckDB in
+    packages/engine/tests/test_column_expressions.py."""
+    import importlib.util
+
+    from obi_formats.colexpr import FEATURES
+
+    path = Path(__file__).resolve().parents[2] / "engine" / "tests" / "test_column_expressions.py"
+    spec = importlib.util.spec_from_file_location("engine_column_expression_tests", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert sorted(FEATURES) == sorted(module.FEATURE_CASES)

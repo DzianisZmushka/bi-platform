@@ -45,7 +45,7 @@ def test_render_all_dashboards(project, capsys):
     assert [Path(p).name for p in out] == ["commercial-review.html", "revenue-overview.html"]
     html = (project / ".obi/render/commercial-review.html").read_text(encoding="utf-8")
     assert 'class="widget-error"' not in html and 'class="render-errors"' not in html
-    assert html.count('class="widget kpi"') == 15 and html.count('class="widget chart"') == 14
+    assert html.count('class="widget kpi"') == 16 and html.count('class="widget chart"') == 14
     assert 'id="regions"' in html and 'href="revenue-overview.html#overview"' in html
 
 
@@ -81,3 +81,16 @@ def test_filter_values_reach_queries_and_expressions():
     assert "Showing all regions" not in html  # visible: ${filters.region.count == 0}
     html_all = render_dashboard(DEMO, "commercial-review", None, AS_OF).html
     assert "Showing all regions" in html_all
+
+
+def test_database_errors_become_file_line_issues(project, capsys):
+    """Static checks cannot know `channel` is text; running the measure does, and the error
+    names the file, line and measure instead of passing a database message through."""
+    m = project / "model/sales.model.yaml"
+    m.write_text(m.read_text(encoding="utf-8").replace("units: { sum: quantity,", "units: { sum: year(channel),"),
+                 encoding="utf-8")
+    assert main(["validate", str(project)]) == 1
+    err = capsys.readouterr().err
+    assert re.search(r"model/sales\.model\.yaml:\d+: error: model `sales`, measure `units`: "
+                     r"function `year` cannot be used on text values", err)
+    assert "Binder" not in err and "VARCHAR" not in err

@@ -1,5 +1,5 @@
 model: sales
-description: Order-line sales with customers, products, regions and monthly revenue targets.
+description: Order-line sales with customers, products, regions, monthly revenue targets and returns.
 
 entities:
   order_lines:
@@ -28,6 +28,15 @@ entities:
         format: currency
       return_rate: { calc: returned_revenue / net_revenue, format: percent }
       discount_rate: { calc: discount_amount / gross_revenue, format: percent }
+      new_customer_revenue:
+        sum: quantity * unit_price * (1 - discount)
+        label: New customer revenue
+        where: year(signup_date) = year(date)
+        format: currency
+      new_customer_share:
+        calc: new_customer_revenue / net_revenue
+        label: New customer share
+        format: percent
 
   targets:
     description: Monthly net revenue targets per region, set by finance.
@@ -39,6 +48,20 @@ entities:
       revenue_target: { sum: revenue_target, label: Target, format: currency }
       target_attainment: { calc: net_revenue / revenue_target, label: Attainment, format: percent }
       target_gap: { calc: net_revenue - revenue_target, label: Gap to target, format: currency }
+
+  returns:
+    description: |
+      One row per returned order line, with the refund paid and the reason given.
+      Not linked to order_lines (its key has two columns); sliceable by return date and reason only.
+    table: returns
+    key: return_id
+    grain: [date, reason]
+    joins: { calendar: return_date }
+    dimensions:
+      reason: { label: Return reason }
+    measures:
+      refunds: { sum: refund_amount, format: currency }
+      return_count: { count: return_id, label: Returns, format: integer }
 
   calendar:
     table: calendar

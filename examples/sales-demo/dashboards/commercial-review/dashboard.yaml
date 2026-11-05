@@ -44,6 +44,9 @@ pages:
           - kpi: orders
             measure: orders
             compare: previous_year
+          - kpi: new_share
+            measure: new_customer_share
+            compare: previous_year
           - kpi: margin
             measure: gross_margin
             compare: previous_year

@@ -50,3 +50,31 @@ A colour is a theme token: `ok`, `warning`, `danger`, `neutral`, `accent`. The v
 ```yaml
 color: "${value < 0.95 ? 'danger' : value < 1 ? 'warning' : 'ok'}"
 ```
+
+## Column expressions in models
+
+Measures use a second, SQL-like language. It is parsed with sqlglot and checked before anything reaches the
+database ([ADR-008](../adr/008-findings-of-the-llm-model-edit-test.md), implementation
+[`obi_formats/colexpr.py`](../../packages/formats/src/obi_formats/colexpr.py)). A name means something
+different in each place:
+
+| Where | Names refer to | Example |
+|---|---|---|
+| `sum:`, `count:`, `count_distinct:`, `avg:`, `min:`, `max:` | columns of the entity's own table, never prefixed | `quantity * unit_price * (1 - discount)` |
+| `where:` | model dimensions, bare or entity-prefixed, optionally with a time grain, from any entity reachable through joins | `segment = 'Enterprise'`, `year(signup_date) = year(date)`, `date.month = '2026-03-01'` |
+| `calc:` | measures | `net_revenue / orders` |
+
+**Allowed:**
+
+| Feature | Syntax |
+|---|---|
+| arithmetic | `+ - * / %`, unary `-`, parentheses |
+| comparison | `= == != <> < <= > >=`, `in (...)`, `between a and b`, `is null`, `is not null` |
+| boolean | `and`, `or`, `not`, `true`, `false` |
+| literals | numbers, `'text'`, `null`. A date is a text literal such as `'2026-03-01'` |
+| functions | `year(x)`, `month(x)`, `quarter(x)`, `date_diff('day'\|'week'\|'month'\|'quarter'\|'year', start, end)`, `coalesce(a, b, ...)`, `case when ... then ... else ... end` |
+
+Anything else is a validation error: "function `upper` is not supported in column expressions". Every name is
+resolved at validation time, with the same "did you mean" help as dashboard references. Every table and column
+is also checked against the data files. `obi validate` then runs each measure once on the data, so a type
+problem (`year()` on a text column) is reported as `file:line` naming the measure, never as a database error.
