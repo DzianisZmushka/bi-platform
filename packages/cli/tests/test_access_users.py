@@ -6,6 +6,7 @@ is refused on the server; the history records who wrote; and the page reflects w
 decided ("no access", read-only forms, forbidden dashboards)."""
 
 from datetime import date
+import re
 import os
 import shutil
 from pathlib import Path
@@ -163,7 +164,7 @@ ERP_USERS = {
     "admin": {"name": "ada", "roles": ["admin"]},
     "rep": {"name": "rob", "roles": ["sales_rep"], "sales_orgs": ["DE01"]},
     "manager": {"name": "mia", "roles": ["sales_manager"], "sales_orgs": ["DE01", "PL01"]},
-    "viewer": {"name": "vic", "roles": ["viewer"], "sales_orgs": ["US01"]},
+    "viewer": {"name": "vic", "roles": ["auditor"], "sales_orgs": ["US01"]},
 }
 ALL_ORGS = ["DE01", "PL01", "AE01", "US01", "US02"]
 ORDER = ("FROM vbap p JOIN vbak k ON p.VBELN = k.VBELN "
@@ -204,6 +205,10 @@ def test_erp_totals_match_sql_with_the_users_where(erp, who):
           ON d.VGBEL = p.VBELN AND d.VGPOS = p.POSNR
         WHERE k.VKORG IN {orgs} GROUP BY 1"""))
     close(by_material, want)
+    if who == "rep":  # sales_rep denies read on shipment_plans: "never sees the shipment plan"
+        with pytest.raises(NoAccess, match="you may not read `shipment_plans`"):
+            eng.query(SemanticQuery(["planned_shipments_usd"], []))
+        return
     plans = eng.query(SemanticQuery(["planned_shipments_usd"], [])).to_pylist()[0]["planned_shipments_usd"]
     assert plans == pytest.approx(oracle(erp, f"""
         SELECT SUM(planned_value_usd) FROM store.main.shipment_plans WHERE VKORG IN {orgs}""")[0][0])
@@ -228,7 +233,7 @@ def test_erp_cost_is_readable_only_by_listed_roles(erp, who, readable):
     if readable:
         eng.query(SemanticQuery(["margin"], []))
     else:
-        with pytest.raises(NoAccess, match=r"`order_items.WAVWR` is readable only by sales_manager, admin"):
+        with pytest.raises(NoAccess, match=r"`order_items.WAVWR` is readable only by sales_manager, finance, admin"):
             eng.query(SemanticQuery(["margin"], []))
 
 
@@ -272,3 +277,41 @@ def test_auditor_never_writes_whatever_other_roles_say(tmp_path):
         "": ["aud may not edit form `order-note`; access.yaml gives `edit` on it to none of their roles"]}
     html = render_dashboard(root, "order-to-cash", None, AS_OF, mode="serve", user=both).html
     assert "You may view this form, but none of your roles may edit it." in html
+
+
+def control(html: str, name: str) -> list[str]:
+    """The opening tags of every visible control named `name` (hidden inputs left out)."""
+    return [t for t in re.findall(rf'<(?:input|select|textarea)[^>]*name="{name}"[^>]*>', html) if 'type="hidden"' not in t]
+
+
+def test_page_shows_columns_the_user_may_not_write_as_read_only(tmp_path):
+    """access.yaml `columns: {order_notes.next_step: {write: [...]}}`: the rep's form shows next_step
+    disabled (LLM test 5 found it enabled). The server refuses the write whatever the page sent."""
+    root = fresh(tmp_path, "erp-sales")
+    rep, manager = ERP_USERS["rep"], ERP_USERS["manager"]
+    inputs = {"order": [item_of(root, "DE01")["VBELN"]], "order_item": [item_of(root, "DE01")["POSNR"]]}
+    rep_html = render_dashboard(root, "order-to-cash", inputs, AS_OF, mode="serve", user=rep).html
+    mia_html = render_dashboard(root, "order-to-cash", inputs, AS_OF, mode="serve", user=manager).html
+    assert [" disabled" in t for t in control(rep_html, "next_step")] == [True]
+    assert [" disabled" in t for t in control(rep_html, "note")] == [False]
+    assert [" disabled" in t for t in control(mia_html, "next_step")] == [False]
+    # Saving the rep's page as it was posted (next_step empty) works; setting it is refused.
+    assert post(root, rep, _form="order-note", _action="save", note="x", next_step="", **item_of(root, "DE01")) is None
+    assert post(root, rep, _form="order-note", _action="save", note="x", next_step="check stock",
+                **item_of(root, "DE01")) == {"next_step": ["`next_step` may be written only by sales_manager, admin"]}
+
+
+def test_sheet_shows_columns_the_user_may_not_write_as_read_only(tmp_path):
+    from obi_cli.render import render_form_page
+
+    root = fresh(tmp_path, "erp-sales")
+    access = root / "access.yaml"
+    access.write_text(access.read_text(encoding="utf-8").replace(
+        "  order_notes.next_step:", "  shipment_plans.planned_value_usd: { write: [admin] }\n  order_notes.next_step:"),
+        encoding="utf-8")
+    html = render_form_page(root, "shipment-plan", ERP_USERS["manager"], "/forms/shipment-plan", None, {}, "", AS_OF)
+    values = control(html, "planned_value_usd")
+    assert len(values) > 1 and all(" disabled" in t for t in values)  # every row and the new row
+    assert any(" disabled" not in t for t in control(html, "VKORG"))  # the new row's key stays editable
+    admin = render_form_page(root, "shipment-plan", ERP_USERS["admin"], "/forms/shipment-plan", None, {}, "", AS_OF)
+    assert not any(" disabled" in t for t in control(admin, "planned_value_usd"))

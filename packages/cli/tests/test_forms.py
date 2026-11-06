@@ -55,7 +55,7 @@ def test_form_creates_until_the_row_exists_then_edits_it_with_transition_buttons
     assert after.endswith("#open_orders")  # on_submit: { navigate: open_orders }
     key = {"VBELN": inputs["order"][0], "POSNR": inputs["order_item"][0]}
     nxt, state = post(root, BOB, _form="order-note", _action="save", _return="/order-to-cash", _next=after, **key,
-                      note="Call the customer", next_step="call customer")
+                      note="Call the customer")
     assert state is None and nxt == after
     html = note_page(root, inputs, BOB)
     assert "Editing the existing record · status <b>draft</b>, last changed by bob" in html
@@ -80,12 +80,12 @@ def test_submit_and_approve_through_the_form(erp):
 def test_form_errors_re_render_with_the_entered_values(erp):
     root, inputs = erp
     key = {"VBELN": inputs["order"][0], "POSNR": inputs["order_item"][0]}
-    nxt, state = post(root, BOB, _form="order-note", _action="save", **key, note="", next_step="dance")
+    nxt, state = post(root, MIA, _form="order-note", _action="save", **key, note="", next_step="dance")
     assert nxt is None
     assert state["order-note"]["errors"] == {"note": ["is required"],
                                              "next_step": ["must be one of call customer, check stock, "
                                                            "wait for payment, cancel item"]}
-    html = render_dashboard(root, "order-to-cash", inputs, AS_OF, mode="serve", user=BOB, form_state=state).html
+    html = render_dashboard(root, "order-to-cash", inputs, AS_OF, mode="serve", user=MIA, form_state=state).html
     assert '<span class="form-error">is required</span>' in html
 
 
@@ -125,7 +125,7 @@ def test_sheet_import_csv_by_header(tmp_path):
 
 def sheet_weeks(root, query) -> tuple[list[str], list[str]]:
     from obi_cli.render import render_form_page
-    html = render_form_page(root, "shipment-plan", BOB, "/forms/shipment-plan", None, query, "", AS_OF)
+    html = render_form_page(root, "shipment-plan", MIA, "/forms/shipment-plan", None, query, "", AS_OF)
     weeks = sorted(set(re.findall(r'name="week_start"[^>]*value="(\d{4}-\d\d-\d\d)"', html)))
     return weeks, re.findall(r'class="form-error">(.*?)<', html)
 

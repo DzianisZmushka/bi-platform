@@ -1171,6 +1171,29 @@ def _check_access(art: _Artifact | None, models: dict[str, ModelIndex], model_ar
                                f"remove one of them")
                     break
 
+    # Hiding a form does not hide its entity: a role that denies view of a form but may still read
+    # the entity sees the same data in every dashboard widget built on it.
+    def entity_list(r: dict, *keys) -> list:
+        for k in keys:
+            r = r.get(k) if isinstance(r, dict) else None
+        return r if isinstance(r, list) else []
+
+    default = roles.get("default") if isinstance(roles.get("default"), dict) else {}
+    for rn, r in roles.items():
+        if not isinstance(r, dict):
+            continue
+        pats = entity_list(r, "deny", "view", "forms")
+        granted = [n for x in (default, r) for k in ("read", "write") for n in entity_list(x, k)]
+        denied = [n for x in (default, r) for n in entity_list(x, "deny", "read")]
+        for fid in forms:
+            entity = form_entity(fid)
+            if not entity or not any(isinstance(p, str) and _glob(p, fid) for p in pats):
+                continue
+            if any(n in ("*", entity) for n in granted) and not any(n in ("*", entity) for n in denied):
+                art.report(("roles", rn, "deny", "view"), f"role `{rn}`",
+                           f"`deny.view` hides form `{fid}`, but the role may still read `{entity}`: the data stays "
+                           f"visible on dashboards; deny read on `{entity}` too, or drop this deny", "warning")
+
     # A writable entity that a form writes needs a role that may write it.
     def may_write(entity: str) -> bool:
         return any(isinstance(r, dict) and (any(n in ("*", entity) for n in r.get("write") or [])

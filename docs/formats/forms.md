@@ -48,11 +48,14 @@ kpi_comments:
 
 ```yaml
 workflow:
-  column: status          # a column with choices: the states
+  column: status  # a column with choices: the states
   transitions:
     submit: { from: draft, to: submitted }
     approve: { from: submitted, to: approved, by: "${user.roles.includes('sales_manager')}" }
-    reopen: { from: [submitted, approved], to: draft, by: "${user.roles.includes('sales_manager')}" }
+    reopen:
+      from: [submitted, approved]
+      to: draft
+      by: "${user.roles.includes('sales_manager')}"
 ```
 
 - The workflow column is never a form field; it changes only through `transitions`.
@@ -103,8 +106,8 @@ on_submit: { navigate: open_orders }
 sheet: targets
 title: Revenue targets
 entity: targets
-
 columns: [month, region_id, revenue_target]
+
 filters:
   - filter: period
     column: month
@@ -131,8 +134,8 @@ The page only reflects the rules; the server enforces them. A request built by h
 ## In dashboards
 
 ```yaml
-- form: kpi-comment          # embeds a form or a sheet; its id is the form's id
-- text: revenue_comment      # "record text": the first row of a dimensions-only query
+- form: kpi-comment  # embeds a form or a sheet; its id is the form's id
+- text: revenue_comment  # "record text": the first row of a dimensions-only query
   rows: [comment, commented_by, commented_at]
   where: { kpi: revenue }
   ignore_filters: [channel, segment]

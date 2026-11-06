@@ -32,7 +32,9 @@ roles:
   sales_rep:
     edit: { forms: [order-note] }
   auditor:
-    deny: { edit: { forms: ["*"] }, write: ["*"] }
+    deny:
+      edit: { forms: ["*"] }
+      write: ["*"]
   admin:
     edit: { forms: ["*"] }
     rows: all
@@ -64,6 +66,8 @@ columns:
 | `write` | Writable entities the role may write **without a form** (the store, later an API). Writes through a form need only `edit` on it. Implies `read`. |
 | `rows: all` | The entities' `access:` conditions do not apply (administrators). |
 | `deny` | The same `view`, `edit`, `read` and `write`, taken away even when another role of the user allows it. To keep a dashboard from someone, deny it: `deny: { view: { dashboards: [finance-*] } }`. |
+
+**Hiding a form does not hide its entity's data.** `deny: { view: { forms: [shipment-plan] } }` leaves out the sheet, but every dashboard widget built on `shipment_plans` still shows the numbers. To keep the data from a role, deny the entity as well: `read: [shipment_plans]` under the same `deny`. The validator warns when a role denies view of a form whose entity it may still read.
 
 **Patterns.** Artifact ids may use `*`: `[order-*]`, `["*"]`. Quote a lone `"*"`, because YAML reads a bare `*` as an alias.
 
@@ -125,6 +129,7 @@ The server decides; the page shows the result.
 - A dashboard the user may not view is not listed, and opening it gives "no access".
 - A form or sheet widget the user may not view is left out.
 - A form the user may view but not edit is read-only.
+- A field or sheet column whose column the user may not write (`columns: { <entity>.<column>: { write: [...] } }`) is read-only.
 - A widget that needs an entity or column the user may not read shows "No access" in place of numbers.
 - Every write is checked again on the server, whatever the page showed (`packages/cli/tests/test_write_rules.py`).
 
@@ -141,4 +146,5 @@ The server decides; the page shows the result.
 - Warnings:
   - a writable entity that a form writes, but no role may edit or write;
   - `rows: all` on `default`;
-  - a fact not covered by any access rule.
+  - a fact not covered by any access rule;
+  - a role that denies view of a form while it may still read the form's entity.

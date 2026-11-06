@@ -1,23 +1,34 @@
 access: erp-sales
-description: Who may see and write what. Users and their roles are never in Git (ADR-013).
+description: Who may see and write what in order-to-cash. Users and their roles come from the identity provider, never from Git.
 
 attributes:
   sales_orgs:
     type: list
-    description: Sales organisations (VKORG, such as DE01) the user works for, as in `sales_org_code`. Without it a user sees no rows.
+    description: Sales organisations (VKORG, such as DE01) the user works for. Without it a user sees no rows.
 
 roles:
   default:
-    description: Everyone who signs in, before their own roles. Restricting what someone sees is done with `deny`.
+    description: Everyone who signs in.
     view: { dashboards: ["*"], forms: ["*"] }
     read: ["*"]
-  viewer: { description: "Reads orders, notes and the shipment plan of their sales orgs." }
   sales_rep:
-    description: Writes notes on the open items of their sales orgs.
+    description: Writes notes on open items of their sales orgs; never sees the shipment plan.
     edit: { forms: [order-note] }
+    deny:
+      view: { forms: [shipment-plan] }
+      read: [shipment_plans]
   sales_manager:
-    description: Approves notes and keeps the shipment plan for their sales orgs.
+    description: Approves notes, sets next steps and keeps the shipment plan for their sales orgs.
     edit: { forms: ["*"] }
+  planner:
+    description: Keeps the shipment plan only.
+    edit: { forms: [shipment-plan] }
+  finance:
+    description: Reads cost and margin for every sales org and writes nothing.
+    rows: all
+    deny:
+      edit: { forms: ["*"] }
+      write: ["*"]
   auditor:
     description: Reads everything in their sales orgs and never writes, whatever other roles they hold.
     deny:
@@ -28,5 +39,7 @@ roles:
     edit: { forms: ["*"] }
     rows: all
 
+# Cost is visible only to those who manage margin; reps see revenue but not WAVWR.
 columns:
-  order_items.WAVWR: { read: [sales_manager, admin] }
+  order_items.WAVWR: { read: [sales_manager, finance, admin] }
+  order_notes.next_step: { write: [sales_manager, admin] }

@@ -76,6 +76,11 @@ class FormContext:
         """Whether this form saves here: in `obi serve`, for a user whose roles may edit it."""
         return self.mode == "serve" and self.writer.grants.can_edit_form(fid)
 
+    def may_write(self, entity: str, column: str) -> bool:
+        """Whether the user may write this column (access.yaml `columns`). The page only reflects
+        it: the store refuses the write whatever the page sent (test_write_rules.py)."""
+        return self.writer.grants.can_write_column(entity, column)
+
     def expr(self, text):
         if not isinstance(text, str) or "${" not in text:
             return text
@@ -137,7 +142,7 @@ def render_form(ctx: FormContext, fid: str, form: dict, navigate_href=None) -> s
         widget = f.get("widget") or ("select" if spec.get("choices") or spec.get("references")
                                      else WIDGET_FOR.get(ctype, "text"))
         required = bool(f.get("required", spec.get("required"))) and ctype != "id"
-        readonly = bool(f.get("readonly")) or not live
+        readonly = bool(f.get("readonly")) or not live or not ctx.may_write(form["entity"], name)
         control = _control(ctx, form["entity"], name, widget, spec, values.get(name), required, readonly)
         err = "".join(f'<span class="form-error">{esc(m)}</span>' for m in errors.get(name, []))
         help_ = f'<span class="help">{esc(f["help"])}</span>' if f.get("help") else ""
@@ -230,7 +235,7 @@ def render_sheet(ctx: FormContext, sid: str, sheet: dict) -> str:
         fid = f"row-{sid}-{i}"
         keyjson = json.dumps({k: _text(r.get(k)) for k in w.key})
         cells = "".join(
-            f"<td>{_control(ctx, sheet['entity'], c, _sheet_widget(w, c), w.columns.get(c, {}), r.get(c), False, not live or 'edit' not in allow or c in readonly or c in w.key, fid)}</td>"
+            f"<td>{_control(ctx, sheet['entity'], c, _sheet_widget(w, c), w.columns.get(c, {}), r.get(c), False, not live or 'edit' not in allow or c in readonly or c in w.key or not ctx.may_write(sheet['entity'], c), fid)}</td>"
             for c in cols)
         hist = urlencode({**{k: v[0] for k, v in ctx.query.items()}, "history": f"{sid}:{keyjson}"})
         actions = ""
@@ -246,7 +251,7 @@ def render_sheet(ctx: FormContext, sid: str, sheet: dict) -> str:
         body.append(f"<tr>{cells}<td class='row-actions'>{actions}</td></tr>")
     if live and "add" in allow:
         fid = f"row-{sid}-new"
-        cells = "".join(f"<td>{_control(ctx, sheet['entity'], c, _sheet_widget(w, c), w.columns.get(c, {}), (state.get('values') or {}).get(c), False, c in readonly, fid)}</td>"
+        cells = "".join(f"<td>{_control(ctx, sheet['entity'], c, _sheet_widget(w, c), w.columns.get(c, {}), (state.get('values') or {}).get(c), False, c in readonly or not ctx.may_write(sheet['entity'], c), fid)}</td>"
                         for c in cols)
         body.append(f'<tr class="new-row">{cells}<td class="row-actions"><form id="{esc(fid)}" method="post" '
                     f'action="/_write"><input type="hidden" name="_form" value="{esc(sid)}">'

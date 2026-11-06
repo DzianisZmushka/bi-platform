@@ -57,6 +57,13 @@ def test_edit_on_a_form_whose_entity_is_denied_for_write():
         "`sales_rep` denies in `deny.write`; remove one of them"]
 
 
+def test_denying_view_of_a_form_whose_entity_stays_readable_is_a_warning():
+    """Hiding a form does not hide its entity (LLM test 5): the rep still saw the plan on the dashboard."""
+    assert messages("erp-sales", "access.yaml", "      read: [shipment_plans]\n", "") == [
+        "access `erp-sales`, role `sales_rep`: `deny.view` hides form `shipment-plan`, but the role may still read "
+        "`shipment_plans`: the data stays visible on dashboards; deny read on `shipment_plans` too, or drop this deny"]
+
+
 def test_column_rules_name_real_columns_and_roles():
     assert messages("sales-demo", "access.yaml", "order_lines.unit_cost: { read: [sales_manager, admin] }",
                     "order_lines.unit_cots: { read: [sales_manger, admin] }") == [
