@@ -18,7 +18,7 @@ The model hides the technical column names. Its decisions are in [ADR-009](../..
 | text table keyed by a code prefix | `product_line: { lookup: t179t.VTEXT, key: PRODH, match: "left(PRDHA, 5)" }` |
 | billed or delivered quantity per order item | `rollups: { billed_quantity: { sum: FKIMG, from: billing_items } }`. Rollup names are local to their entity |
 | billing counted in the order's period | `date: order_date` on the measure |
-| amounts in document currency | model `currency: { target, rates }`, entity `currency: { code, date }` (each entity converts at its own date), measure `convert: USD` |
+| amounts in document currency | model `currency: { target: USD, rates: { table, currency, month, rate } }` (`rate` × amount = amount in `target`), entity `currency: { code, date }` (each entity converts at its own date), measure `convert: USD` |
 | fiscal periods | `fiscal: { year, period }` on the date dimension; `date.fiscal_period`; presets such as `fiscal_year_to_date` |
 
 `order_value` is in document currency, so it may only appear in a widget that also shows `document_currency`. Use `order_value_usd` everywhere else.

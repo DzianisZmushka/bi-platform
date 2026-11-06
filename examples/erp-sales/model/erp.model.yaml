@@ -32,12 +32,14 @@ entities:
         format: currency
       open_order_value_usd:
         sum: (KWMENG - billed_quantity) * NETWR / KWMENG
+        description: Snapshot (ADR-010), the current state, not a sum over a period.
         where: rejection_reason is null
         convert: USD
         format: currency
       shipped_not_billed_usd:
         sum: (delivered_quantity - billed_quantity) * NETWR / KWMENG
         label: Shipped, not billed
+        description: Snapshot (ADR-010), the current state, not a sum over a period.
         where: rejection_reason is null
         convert: USD
         format: currency

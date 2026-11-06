@@ -12,6 +12,12 @@ The full formats are in the JSON Schemas in [packages/formats/src/obi_formats/sc
 
 **Key order** (what `obi-formats fmt` produces, so write it this way): the kind key first (`kpi: id`, `sum: ...`), then `title`/`label`/`description`, then bindings (`measure`, `x`, `y`, `rows`, `values`, `where`, `grain`, `ignore_filters`), then behaviour (`sort`, `limit`, `totals`, `on_click`, `visible`), then presentation (`format`, `color`, `cells`), and `items` last.
 
+## Project and model files
+
+`project.yaml`: `project: <id>`, `title`, `description`, `default_connection: <name>`, `currency: USD`, and `connections: { <name>: { duckdb:, tables: { <table>: <file> } } }`. `duckdb:` left empty means an in-memory DuckDB that reads the listed CSV or Parquet files. `duckdb: { database: <file> }` is not supported yet; the validator reports it.
+
+`model/<id>.model.yaml`: `model: <id>`, `title`, `description`, `currency` (optional, see erp-sales), `entities: { <name>: <entity> }` and `hierarchies`.
+
 ## Model (`model/*.model.yaml`)
 
 | Element | Shape |

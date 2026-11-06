@@ -151,3 +151,29 @@ def test_every_expression_feature_has_a_duckdb_test():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     assert sorted(FEATURES) == sorted(module.FEATURE_CASES)
+
+
+# --------------------------------------------------------------------------- documentation (CLAUDE.md)
+
+ROOT = Path(__file__).resolve().parents[3]
+DOC_FILES = sorted(ROOT.glob("examples/*/README.md")) + sorted(ROOT.glob("docs/formats/*.md"))
+
+
+def _documented(name: str, text: str) -> bool:
+    """Named as code: inside backticks, or as a YAML key (`name:`)."""
+    n = re.escape(name)
+    return re.search(rf"`[^`\n]*\b{n}\b[^`\n]*`|(^|[\s{{,]){n}:", text, re.M) is not None
+
+
+@pytest.mark.parametrize("kind, owner, prop, sub", list(cases()))
+def test_every_schema_property_is_documented(kind, owner, prop, sub):
+    docs = "\n".join(p.read_text(encoding="utf-8") for p in DOC_FILES)
+    assert DOC_FILES, "no documentation found"
+    assert _documented(prop, docs), (
+        f"{kind} schema `{owner}.{prop}` exists in code but no README under examples/ or file in docs/formats/ "
+        f"mentions `{prop}`. Document it there (CLAUDE.md).")
+
+
+def test_documentation_check_is_not_trivially_true():
+    assert not _documented("no_such_property_xyz", "`no_such_property_x` and other: text")
+    assert _documented("convert", "measure `convert: USD`") and _documented("rate", "  rate: UKURS")

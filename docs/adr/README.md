@@ -13,3 +13,4 @@ Short records: context, decision, consequences. A record is never edited after a
 | [007](007-phase-0-renderer.md) | Phase 0 renderer: server-side HTML from the CLI | Accepted |
 | [008](008-findings-of-the-llm-model-edit-test.md) | Findings of the LLM model-edit test | Accepted |
 | [009](009-erp-sources-joins-currency-fiscal.md) | ERP sources: joins, currency, fiscal calendar, rollups, lookups | Accepted |
+| [010](010-snapshot-measures.md) | Snapshot measures (state at a date) | Proposed, Phase 1 |
