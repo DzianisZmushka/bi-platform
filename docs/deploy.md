@@ -68,6 +68,14 @@ docker compose -f deploy/compose.yaml exec obi obi users add mia --role sales_ma
 
 Each command asks for the password twice. `--admin` is platform administration: an admin sees a failed deploy's errors on every page. It is not a project role.
 
+There is no `--password` option, because a password on the command line ends up in the shell history and the process list. In a script, pipe it in with `--password-stdin` (`-T`: no terminal, so stdin reaches the command):
+
+```bash
+echo 'the password' | docker compose -f deploy/compose.yaml exec -T obi obi users add mia --role sales_manager --attr sales_orgs=DE01 --password-stdin
+```
+
+Without Docker the same line is `echo 'the password' | obi users add mia --role sales_manager --attr sales_orgs=DE01 --password-stdin` (add `--project <dir>` or `--home <dir>`).
+
 **5. Send the link** `https://bi.example.com/` (1 minute). Colleagues sign in and see the dashboards and forms their roles allow.
 
 ## Deploying a new commit
@@ -88,6 +96,8 @@ The server answers at once and deploys in the background; the command waits and 
 The server checks the `X-Hub-Signature-256` signature and answers 202 within a second, so GitHub never times out; the result is in `/_deploy/status`. From anywhere else, `obi deploy --url https://bi.example.com --token <OBI_DEPLOY_TOKEN>` does the same.
 
 ## Operating
+
+- **Scripts and curl:** forms write through `POST /_write`, described in [forms.md](formats/forms.md#writing-over-http-the-_write-protocol): fields, `_action` values (`save`, `transition:submit`, `sheet_add`, ...), and answers. A refused write is a 422 page with the reasons in the `X-Obi-Error` header.
 
 - **Health:** `GET /_health` answers `{"status": "ok", "commit": "<served commit>"}`, or 503 before the first successful deploy. It needs no sign-in, and Docker's `HEALTHCHECK` uses it.
 - **Logs:** stdout, one line per request (`2026-11-06T10:15:02 GET /order-to-cash 200 mia 84ms`). The query string is never logged, because it holds filter values. There is one line per deploy.

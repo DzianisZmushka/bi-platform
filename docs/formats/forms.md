@@ -131,6 +131,42 @@ The page only reflects the rules; the server enforces them. A request built by h
 - a missing `required` field;
 - a column rule, a `per` parent that does not exist, or a transition from the wrong state or by the wrong user.
 
+## Writing over HTTP: the `/_write` protocol
+
+Every save from a page is one form-encoded `POST /_write`. Until a real API exists, this is the API: a script or `curl` sends the same fields and gets the same checks and refusals as the page.
+
+**Who:** the session cookie from `POST /_signin` (fields `name`, `password`; the answer sets `obi_session`). With `obi serve --user` no sign-in is needed.
+
+**Fields:**
+
+| Field | Meaning |
+|---|---|
+| `_form` | The form or sheet id. |
+| `_action` | What to do; see below. |
+| `_return` | The page to come back to, such as `/order-to-cash` (default `/`). |
+| `_next` | A form only: where to go after a successful save (`on_submit: { navigate }` fills it on the page). |
+| `<field>` | One per form field or sheet column, by its name (`note`, `VBELN`). A form's key fields pick the row: new row or edit. |
+| `_key` | Sheets only, for `sheet_save` and `sheet_delete`: the row's key as JSON, `{"month": "2026-01-01", "region_id": "emea"}`. |
+| `_rows` | Sheets only. For `sheet_paste`: tab-separated lines, in the sheet's column order without `readonly` and workflow columns. For `sheet_import`: CSV with a header row. |
+
+**`_action` values:**
+- A form takes `save` (the default) or `transition:<name>`, such as `transition:submit` or `transition:approve` (the model's workflow).
+- A sheet takes `sheet_add`, `sheet_save`, `sheet_delete`, `sheet_paste` or `sheet_import`, each only when the sheet's `allow` lists it.
+
+**Answers:**
+- `303` to `_next` or `_return`: written.
+- `422`: refused, nothing written. The page shows the reasons inside the form. The `X-Obi-Error` header holds them all on one line (`note: is required; next_step: must be one of ...`). Printable ASCII is sent as is; other characters and `%` are percent-encoded UTF-8.
+- `401`: not signed in (with an `X-Obi-Error` saying so).
+- `503`: no release is deployed yet.
+
+```bash
+curl -s -c jar -d name=mia --data-urlencode password='the password' http://127.0.0.1:8765/_signin
+```
+
+```bash
+curl -s -b jar -o /dev/null -D - -d _form=order-note -d _action=transition:submit -d VBELN=0001005963 -d POSNR=000040 -d note=x http://127.0.0.1:8765/_write
+```
+
 ## In dashboards
 
 ```yaml

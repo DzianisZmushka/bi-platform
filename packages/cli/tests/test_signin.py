@@ -69,8 +69,10 @@ def test_every_page_needs_sign_in(port, erp):
         status, headers, _ = c.get(path)
         assert status == 303 and headers["Location"].startswith("/_signin?next=%2F"), path
     before = notes(erp)
-    status, _, text = c.post("/_write", {"_form": "order-note", "_action": "save", "note": "x", **item_of(erp, "DE01")})
+    status, headers, text = c.post("/_write", {"_form": "order-note", "_action": "save", "note": "x",
+                                               **item_of(erp, "DE01")})
     assert status == 401 and "Your session has ended" in text
+    assert headers["X-Obi-Error"] == "not signed in: POST /_signin first and send the session cookie"
     assert notes(erp) == before  # nothing written
 
 
@@ -180,9 +182,22 @@ def test_store_users_write_inside_their_rows_only(tmp_path):
         status, headers, _ = c.post("/_write", {"_form": "order-note", "_action": "save", "note": "Call",
                                                 "_return": "/order-to-cash", **de})
         assert status == 303
-        status, _, text = c.post("/_write", {"_form": "order-note", "_action": "save", "note": "Call",
-                                             "_return": "/order-to-cash", **pl})
+        status, headers, text = c.post("/_write", {"_form": "order-note", "_action": "save", "note": "Call",
+                                                   "_return": "/order-to-cash", **pl})
         assert status == 422 and f"there is no order_items row with VBELN = {pl['VBELN']}" in text
+        # the reason is also one header line, for curl and scripts (the page shows it in the form)
+        assert headers["X-Obi-Error"] == f"there is no order_items row with VBELN = {pl['VBELN']}, POSNR = {pl['POSNR']}"
+        # several reasons, by field; a transition sent as `_action=transition:<name>`
+        status, headers, _ = c.post("/_write", {"_form": "order-note", "_action": "save", "note": "",
+                                                "next_step": "dance", **de})
+        assert status == 422 and headers["X-Obi-Error"] == (
+            "note: is required; next_step: must be one of call customer, check stock, wait for payment, cancel item; "
+            "next_step: `next_step` may be written only by sales_manager, admin")
+        assert c.post("/_write", {"_form": "order-note", "_action": "transition:submit", "note": "x", **de})[0] == 303
+        status, headers, _ = c.post("/_write", {"_form": "order-note", "_action": "transition:approve", "note": "x",
+                                                **de})
+        assert status == 422 and headers["X-Obi-Error"] == (
+            "status: `approve` is not allowed for rob (`${user.roles.includes('sales_manager')}`)")
     rows = Project(root).con.sql("SELECT VBELN, created_by FROM store.main.order_notes").fetchall()
     assert rows == [(de["VBELN"], "rob")]
 
@@ -239,3 +254,11 @@ def test_sign_in_page_says_how_to_add_the_first_user(tmp_path):
         assert f"No users yet. Add one on the server: <code>obi users add &lt;name&gt; --project {root}" in text
         UserStore.at(data_dir(root)).add("mia", PASSWORD, ["sales_manager"], {"regions": ["emea"]})
         assert "No users yet" not in Client(p).get("/_signin")[2]
+
+
+def test_error_header_is_greppable_ascii_with_the_rest_percent_encoded():
+    from obi_cli.server import header_text, refusal
+    assert header_text("row 2: month: fails the rule `day(month) = 1`") == "row 2: month: fails the rule `day(month) = 1`"
+    assert header_text("planned → 100%\nnext") == "planned %E2%86%92 100%25 next"
+    assert refusal({"targets": {"errors": ["row 1: a", "row 2: b"]}}) == "row 1: a; row 2: b"
+    assert refusal(None) is None

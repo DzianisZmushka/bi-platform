@@ -207,19 +207,20 @@ class App:
                                   user=user, here=path_qs, form_state=form_state, query=qs)
         return 200, result.html
 
-    def write(self, body: dict, user: dict, admin: bool) -> tuple[int, str, str | None]:
-        """(status, page, redirect) for a POST to /_write."""
+    def write(self, body: dict, user: dict, admin: bool) -> tuple[int, str, str | None, str | None]:
+        """(status, page, redirect, refusal) for a POST to /_write. `refusal` is every message of
+        a refused write on one line, for the `X-Obi-Error` header."""
         rel = self.site.release()
         if rel is None:
-            return 503, _page("Not deployed", "No release is deployed yet."), None
+            return 503, _page("Not deployed", "No release is deployed yet."), None, "no release is deployed yet"
         project = Project(rel.root)
         auto_migrate(project)
         redirect, state = handle_post(project, user, load_forms(rel.root), body)
         if redirect:
-            return 303, "", redirect
+            return 303, "", redirect, None
         back = (body.get("_return") or ["/"])[0]
         status, page = self.page(back, user, admin, state)
-        return (422 if status == 200 else status), page, None
+        return (422 if status == 200 else status), page, None, refusal(state)
 
     def deploy_allowed(self, headers, raw: bytes) -> bool:
         """`Authorization: Bearer <OBI_DEPLOY_TOKEN>` (obi deploy), or GitHub's signature of the body."""
@@ -247,6 +248,25 @@ class App:
             return 503, {"status": "not deployed"}
         commit = rel.commit if self.site.git else (self.local_commit or "")
         return 200, {"status": "ok", "commit": commit}
+
+
+def refusal(state: dict | None) -> str | None:
+    """Every message of a refused write, on one line: `field: message; ...` (a form's errors are
+    per field, `""` for the whole row; a sheet's are already lines)."""
+    msgs = []
+    for st in (state or {}).values():
+        errors = st.get("errors") or {}
+        if isinstance(errors, dict):
+            msgs += [f"{c}: {m}" if c else m for c, ms in errors.items() for m in ms]
+        else:
+            msgs += list(errors)
+    return "; ".join(msgs) or None
+
+
+def header_text(text: str) -> str:
+    """A header value: printable ASCII as is (so a grep finds the message), everything else,
+    and `%`, percent-encoded as UTF-8 (HTTP headers are Latin-1)."""
+    return "".join(c if " " <= c <= "~" and c != "%" else quote(c, safe="") for c in text.replace("\n", " "))
 
 
 def deploy_token(site: Site) -> str | None:
@@ -328,12 +348,13 @@ def make_server(app: App, host: str = "127.0.0.1", port: int = 8765) -> Threadin
                 user, admin = app.identify(self.headers.get("Cookie"))
                 if user is None:
                     return self._send(401, _page("Sign in", 'Your session has ended. <a href="/_signin">Sign in</a> '
-                                                            'and send the form again.'))
+                                                            'and send the form again.'),
+                                      error="not signed in: POST /_signin first and send the session cookie")
                 self.user_name = user.get("name", "-")
-                status, page, redirect = app.write(parse_body(raw), user, admin)
+                status, page, redirect, error = app.write(parse_body(raw), user, admin)
                 if redirect:
                     return self._redirect(redirect)
-                self._send(status, page)
+                self._send(status, page, error=error)
             except Exception:
                 self._send(500, _page("Write failed", f"<pre>{html.escape(traceback.format_exc())}</pre>"))
             finally:
@@ -364,13 +385,15 @@ def make_server(app: App, host: str = "127.0.0.1", port: int = 8765) -> Threadin
         def _json(self, status: int, data: dict):
             self._raw(status, json.dumps(data).encode("utf-8"), "application/json")
 
-        def _send(self, status: int, body: str):
-            self._raw(status, body.encode("utf-8"), "text/html; charset=utf-8")
+        def _send(self, status: int, body: str, error: str | None = None):
+            self._raw(status, body.encode("utf-8"), "text/html; charset=utf-8", error)
 
-        def _raw(self, status: int, data: bytes, ctype: str):
+        def _raw(self, status: int, data: bytes, ctype: str, error: str | None = None):
             self.status = status
             self.send_response(status)
             self.send_header("Content-Type", ctype)
+            if error:  # the page shows it inside the form; curl and scripts read it here
+                self.send_header("X-Obi-Error", header_text(error))
             self.send_header("Content-Length", str(len(data)))
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
