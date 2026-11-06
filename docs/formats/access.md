@@ -6,13 +6,19 @@ Two places hold the rules:
 - **`access.yaml`** at the project root: what each role may open, edit, read and write.
 - **`access:`** on model entities: which rows a user may see and write.
 
-Users and their roles are never in Git. Until sign-in (Phase 2b) they come from `obi serve`:
+Users and their roles are never in Git. They sign in with a name and password from the user store next to the project database ([deploy.md](../deploy.md), ADR-014):
+
+```bash
+uv run obi users add mia --project examples/erp-sales --role sales_manager --attr sales_orgs=DE01,PL01
+```
+
+`obi users` checks every role and attribute against access.yaml. For local development, `obi serve` can skip sign-in and act as one user:
 
 ```bash
 uv run obi serve examples/erp-sales --user rob --role sales_rep --attr sales_orgs=DE01
 ```
 
-`--role` can be repeated. A list attribute takes comma-separated values (`--attr sales_orgs=DE01,PL01`). Without a user (`obi render`, `obi validate --execute`) the engine runs as the system and sees every row. `obi serve` always has a user.
+`--role` can be repeated. A list attribute takes comma-separated values (`--attr sales_orgs=DE01,PL01`). Both give the user the same shape: `user.name`, `user.roles` and the attributes. Without a user (`obi render`, `obi validate --execute`) the engine runs as the system and sees every row. `obi serve` always has a user.
 
 ## `access.yaml`
 

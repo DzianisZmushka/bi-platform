@@ -34,7 +34,7 @@ There are no functions, loops or assignments. Null propagates through arithmetic
 
 - `value` is the number being drawn: the KPI value, the bar, the cell.
 - `row.<field>` is any field the widget shows. The field name is the model name, without entity prefix or time grain.
-- `user.<attribute>` is a user attribute supplied at runtime. Until the Phase 2 runtime, `obi serve --user <name> --role <role> --attr <name>=<value>` supplies it until sign-in (Phase 2b). `user.name` and `user.roles` (a list: `user.roles.includes('sales_manager')`) always exist; other attributes are declared in access.yaml ([access.md](access.md)). A list attribute also has `.includes(x)`.
+- `user.<attribute>` is a user attribute supplied at runtime. It comes from the signed-in user's entry in the user store, or from `obi serve --user <name> --role <role> --attr <name>=<value>` in local development. `user.name` and `user.roles` (a list: `user.roles.includes('sales_manager')`) always exist; other attributes are declared in access.yaml ([access.md](access.md)). A list attribute also has `.includes(x)`.
 
 ## Filters
 

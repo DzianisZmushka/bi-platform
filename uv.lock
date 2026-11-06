@@ -7,6 +7,7 @@ members = [
     "obi-cli",
     "obi-engine",
     "obi-formats",
+    "obi-runtime",
     "obi-workspace",
 ]
 
@@ -108,6 +109,7 @@ dependencies = [
     { name = "markdown-it-py" },
     { name = "obi-engine" },
     { name = "obi-formats" },
+    { name = "obi-runtime" },
 ]
 
 [package.metadata]
@@ -115,6 +117,7 @@ requires-dist = [
     { name = "markdown-it-py", specifier = ">=3" },
     { name = "obi-engine", editable = "packages/engine" },
     { name = "obi-formats", editable = "packages/formats" },
+    { name = "obi-runtime", editable = "packages/runtime" },
 ]
 
 [[package]]
@@ -154,6 +157,21 @@ requires-dist = [
 ]
 
 [[package]]
+name = "obi-runtime"
+version = "0.0.0"
+source = { editable = "packages/runtime" }
+dependencies = [
+    { name = "obi-engine" },
+    { name = "obi-formats" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "obi-engine", editable = "packages/engine" },
+    { name = "obi-formats", editable = "packages/formats" },
+]
+
+[[package]]
 name = "obi-workspace"
 version = "0.0.0"
 source = { virtual = "." }
@@ -161,6 +179,7 @@ dependencies = [
     { name = "obi-cli" },
     { name = "obi-engine" },
     { name = "obi-formats" },
+    { name = "obi-runtime" },
 ]
 
 [package.dev-dependencies]
@@ -173,6 +192,7 @@ requires-dist = [
     { name = "obi-cli", editable = "packages/cli" },
     { name = "obi-engine", editable = "packages/engine" },
     { name = "obi-formats", editable = "packages/formats" },
+    { name = "obi-runtime", editable = "packages/runtime" },
 ]
 
 [package.metadata.requires-dev]

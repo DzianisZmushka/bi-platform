@@ -155,4 +155,4 @@ The page only reflects the rules; the server enforces them. A request built by h
 - `project.yaml` names a DuckDB file: `duckdb: { database: .obi/<project>.duckdb }`. It is never in Git, because `.obi/` is ignored.
 - `seeds: { <table>: <csv> }` gives initial rows, loaded once when the table is created; `obi migrate --reseed <table>` loads them again, moving current rows to history.
 - `obi serve` and `obi validate --execute` migrate automatically when the database is missing or behind the model. `obi migrate` runs it explicitly.
-- `obi serve --user <name> --role <role> --attr <name>=<value>` sets `user.*` until sign-in arrives (Phase 2b).
+- `user.*` is the signed-in user ([access.md](access.md)); `obi serve --user <name> --role <role> --attr <name>=<value>` sets it in local development.

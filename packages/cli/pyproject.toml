@@ -6,6 +6,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "obi-formats",
     "obi-engine",
+    "obi-runtime",
     "markdown-it-py>=3",
 ]
 
@@ -22,3 +23,4 @@ packages = ["src/obi_cli"]
 [tool.uv.sources]
 obi-formats = { workspace = true }
 obi-engine = { workspace = true }
+obi-runtime = { workspace = true }

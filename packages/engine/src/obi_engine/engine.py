@@ -99,46 +99,91 @@ def _lit(v) -> str:
     return exp.convert(v).sql("duckdb")
 
 
-# One in-memory DuckDB per project directory and process: file tables are loaded once (and
-# reloaded when a file changes); the project's database file is attached as `store` and holds
-# the writable tables (ADR-012). Each Project gets its own cursor on it, so `obi serve` sees a
-# saved row on the next request without a restart.
+# One in-memory DuckDB per database file and process (per project directory when there is no
+# file): file tables are loaded once (and reloaded when a file changes); the database file is
+# attached as `store` and holds the writable tables (ADR-012). Each Project gets its own cursor
+# on it, so `obi serve` sees a saved row on the next request without a restart.
+#
+# Two checkouts of one project (releases during a deploy, ADR-014) share the database file, and
+# DuckDB opens a file once per process, so they share the connection. Each checkout loads its
+# file tables into its own schema of the in-memory catalogue, so they never see each other's.
 _BASES: dict[str, dict] = {}
 _BASES_LOCK = threading.Lock()
+_DATA_DIRS: dict[str, Path] = {}
 
 
-def _base(root: Path, conn: dict, database: Path | None) -> duckdb.DuckDBPyConnection:
-    key = str(root.resolve())
+def use_data_dir(root: str | Path, data: str | Path | None):
+    """Keep the project's database in `data` instead of the checkout (ADR-014: a deploy replaces
+    the checkout, never the data). `database: .obi/x.duckdb` then resolves to `<data>/x.duckdb`."""
+    key = str(Path(root).resolve())
+    if data is None:
+        _DATA_DIRS.pop(key, None)
+    else:
+        _DATA_DIRS[key] = Path(data)
+
+
+def data_dir(root: str | Path) -> Path:
+    """Where runtime state of the project lives: the bound data directory, else `<project>/.obi`."""
+    return _DATA_DIRS.get(str(Path(root).resolve())) or Path(root) / ".obi"
+
+
+def _schema(root_key: str) -> str:
+    import hashlib
+    return "src_" + hashlib.sha1(root_key.encode("utf-8")).hexdigest()[:12]
+
+
+def _base(root: Path, conn: dict, database: Path | None) -> tuple[duckdb.DuckDBPyConnection, str]:
+    rkey = str(root.resolve())
+    key = f"db:{database.resolve()}" if database is not None else f"dir:{rkey}"
     with _BASES_LOCK:
+        for other, st in list(_BASES.items()):  # the project moved to another database file
+            if other != key and rkey in st["roots"]:
+                _drop_root(other, rkey)
         state = _BASES.get(key)
-        if state is None or state["database"] != database:
-            if state is not None:
-                state["con"].close()
-            state = {"con": duckdb.connect(), "mtimes": {}, "database": database}
+        if state is None:
+            state = {"con": duckdb.connect(), "roots": {}}
             if database is not None:
                 database.parent.mkdir(parents=True, exist_ok=True)
                 state["con"].execute(f"ATTACH '{database.as_posix()}' AS {STORE}")
             _BASES[key] = state
         con = state["con"]
+        mine = state["roots"].setdefault(rkey, {"schema": _schema(rkey), "mtimes": {}})
+        schema = mine["schema"]
+        con.execute(f"CREATE SCHEMA IF NOT EXISTS memory.{schema}")
         for table, rel in (conn.get("tables") or {}).items():
             path = root / rel
             mtime = path.stat().st_mtime if path.is_file() else None
-            if state["mtimes"].get(table) == mtime:
+            if mine["mtimes"].get(table) == mtime:
                 continue
             reader = "read_parquet" if str(rel).endswith(".parquet") else "read_csv_auto"
             # A table, not a view: a view would re-read the file on every query.
-            con.execute(f"CREATE OR REPLACE TABLE memory.main.{_q(table)} AS SELECT * FROM "
+            con.execute(f"CREATE OR REPLACE TABLE memory.{schema}.{_q(table)} AS SELECT * FROM "
                         f"{reader}('{path.as_posix().replace(chr(39), chr(39) * 2)}')")
-            state["mtimes"][table] = mtime
-        return con
+            mine["mtimes"][table] = mtime
+        return con, schema
+
+
+def _drop_root(key: str, rkey: str):
+    state = _BASES[key]
+    mine = state["roots"].pop(rkey, None)
+    if mine is not None:
+        try:
+            state["con"].execute(f"DROP SCHEMA IF EXISTS memory.{mine['schema']} CASCADE")
+        except duckdb.Error:
+            pass
+    if not state["roots"]:
+        state["con"].close()
+        del _BASES[key]
 
 
 def forget(root: str | Path):
-    """Close the project's database (tests, `obi migrate --reseed` from a fresh state)."""
+    """Unload a checkout: its file tables, and the database connection once no checkout uses it
+    (tests, a release that a deploy replaced)."""
+    rkey = str(Path(root).resolve())
     with _BASES_LOCK:
-        state = _BASES.pop(str(Path(root).resolve()), None)
-        if state is not None:
-            state["con"].close()
+        for key, st in list(_BASES.items()):
+            if rkey in st["roots"]:
+                _drop_root(key, rkey)
 
 
 STORE = "store"
@@ -158,9 +203,11 @@ class Project:
         self.connection = self.config["connections"][self.config["default_connection"]]
         duck = self.connection.get("duckdb")
         db = duck.get("database") if isinstance(duck, dict) else None
-        self.database: Path | None = (self.root / db) if db else None
-        self.con = _base(self.root, self.connection, self.database).cursor()
-        self.con.execute("USE memory.main")
+        data = _DATA_DIRS.get(str(self.root.resolve()))
+        self.database: Path | None = ((data / Path(db).name) if data else (self.root / db)) if db else None
+        base, self.schema = _base(self.root, self.connection, self.database)
+        self.con = base.cursor()
+        self.con.execute(f"USE memory.{self.schema}")
         self._models: dict[str, Engine] = {}
 
     def describe(self) -> dict:
@@ -168,7 +215,7 @@ class Project:
         conn = self.config["connections"][self.config["default_connection"]]
         tables = {}
         for table in conn.get("tables") or {}:
-            rows = self.con.sql(f"DESCRIBE memory.main.{_q(table)}").fetchall()
+            rows = self.con.sql(f"DESCRIBE memory.{self.schema}.{_q(table)}").fetchall()
             tables[table] = {r[0]: r[1] for r in rows}
         return {"connection": self.config["default_connection"], "tables": tables}
 

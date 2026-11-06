@@ -15,7 +15,9 @@ uv run obi validate examples/sales-demo --execute # also run every measure on th
 uv run obi catalog examples/sales-demo            # refresh catalog.json from the data source
 uv run obi render examples/sales-demo             # write .obi/render/<dashboard>.html
 uv run obi render examples/sales-demo -f channel=Online -f period=last_year
-uv run obi serve examples/sales-demo              # http://127.0.0.1:8765, live filters
+uv run obi serve examples/sales-demo --user ada --role admin  # http://127.0.0.1:8765, live filters, no sign-in
+uv run obi users add mia --project examples/sales-demo --role sales_manager --attr regions=emea,na
+uv run obi serve examples/sales-demo              # the same with sign-in (users in .obi/, never in Git)
 uv run pytest                # run tests
 uv add --package obi-engine sqlglot   # add a dependency to one package
 uv run scripts/format_stats.py       # line counts of example dashboards
@@ -57,7 +59,7 @@ uv run python examples/sales-demo/data/generate.py
 
 ## The Phase 0 loop: hand a dashboard to any LLM
 
-1. Start the live view: `uv run obi serve examples/sales-demo` and open http://127.0.0.1:8765.
+1. Start the live view: `uv run obi serve examples/sales-demo --user ada --role admin` and open http://127.0.0.1:8765.
 2. Give the LLM the dashboard file plus the model it binds to, for example
    `examples/sales-demo/dashboards/commercial-review/dashboard.yaml` and `examples/sales-demo/model/sales.model.yaml`.
    For best results also include [examples/sales-demo/README.md](examples/sales-demo/README.md) (the vocabulary)

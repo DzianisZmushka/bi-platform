@@ -84,7 +84,7 @@ Model format + dashboard format + JSON Schemas + canonical serializer + validato
 **Phase 2 — runtime**, in two parts ([ADR-013](docs/adr/013-roles-before-deploy.md)). ADR-001…010 say "Phase 1" for this runtime phase; read it as Phase 2. (Composite-key joins were pulled forward into Phase 0, ADR-009.)
 
 - **2a — roles and row-level security**, format first, still on DuckDB and `obi serve --user/--role/--attr`. `access.yaml` (roles as named sets of permissions on dashboards, forms, entities and columns, plus a `default` role, with `deny` over allow) and `access: { where: ... }` on model entities. RLS applies to every read and write through an entity. Users and role membership stay out of Git. Non-goals: sign-in, SCIM, column masking, audit-log export, roles edited in a UI.
-- **2b — deploy and the web app**: Git-backed projects, deploy from branch, Postgres backend, sign-in with an IdP, React runtime (replaces ADR-007's presentation layer), cross-filtering, navigation, themes, snapshot measures (ADR-010).
+- **2b — deploy and the web app**: Git-backed projects, deploy from branch, Postgres backend, sign-in with an IdP, React runtime (replaces ADR-007's presentation layer), cross-filtering, navigation, themes, snapshot measures (ADR-010). Sliced by [ADR-014](docs/adr/014-shareable-link-first.md): slice 1 is "a link I can send to a colleague" (sign-in with a user store outside Git, `obi serve --git`, `obi deploy`, one container), still DuckDB and server-rendered. Postgres and React come only after someone other than the owner has written through that link.
 
 **Phase 3 — Excel reports + scheduling + bursting.**
 
