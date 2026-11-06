@@ -316,3 +316,27 @@ def test_comments_on_erp_properties(before, line):
     commented = text.replace(before, f"{indent}# above\n{line}", 1)  # first occurrence
     out = canon(commented, "model")
     assert f"{indent}# above\n{line}" in out
+
+
+def test_nested_mapping_keeps_short_lists_inline():
+    """ADR-003 rule 5, amended: a nested mapping whose values are scalars or short lists of
+    scalars stays on one line; a top-level section never does; a comment inside forces block."""
+    src = """\
+model: m
+entities:
+  e:
+    table: t
+    key: [a, b]
+    joins:
+      x: k
+      y: [a, b]
+    measures:
+      m1: { count: a }
+hierarchies:
+  h: [a, b]
+"""
+    out = canon(src, "model")
+    assert "    joins: { x: k, y: [a, b] }\n" in out
+    assert "hierarchies:\n  h: [a, b]\n" in out
+    commented = src.replace("      y: [a, b]\n", "      y: [a,  # first\n          b]\n")
+    assert "      y:\n        - a  # first\n        - b\n" in canon(commented, "model")

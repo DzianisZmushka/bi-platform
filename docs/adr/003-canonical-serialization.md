@@ -1,6 +1,6 @@
 # ADR-003: Canonical YAML serialization
 
-- Status: Accepted. Implemented in `obi_formats.yamlio`; §7 refined by [ADR-006](006-serializer-and-comment-preservation.md).
+- Status: Accepted. Rule 5 amended 2026-11-06 (ADR-012 review): inside a nested mapping, values may also be short lists of scalars, so `joins: { calendar: FKDAT, order_items: [AUBEL, AUPOS] }` and `{ type: string, choices: [a, b] }` stay on one line when they fit; top-level sections stay block style. Implemented in `obi_formats.yamlio`; §7 refined by [ADR-006](006-serializer-and-comment-preservation.md).
 - Date: 2026-11-05
 
 ## Context

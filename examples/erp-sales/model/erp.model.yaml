@@ -63,9 +63,7 @@ entities:
     description: Delivery items (LIPS), linked to the order item they ship; dated at goods issue.
     table: lips
     key: [VBELN, POSNR]
-    joins:
-      calendar: WADAT
-      order_items: [VGBEL, VGPOS]
+    joins: { calendar: WADAT, order_items: [VGBEL, VGPOS] }
     dimensions:
       delivery: { column: VBELN }
       goods_issue_date: { column: WADAT, type: date }
@@ -78,9 +76,7 @@ entities:
     table: vbrp
     key: [VBELN, POSNR]
     currency: { code: document_currency, date: billing_date }
-    joins:
-      calendar: FKDAT
-      order_items: [AUBEL, AUPOS]
+    joins: { calendar: FKDAT, order_items: [AUBEL, AUPOS] }
     dimensions:
       billing_date: { column: FKDAT, type: date }
     measures:

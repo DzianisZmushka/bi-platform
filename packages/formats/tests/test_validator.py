@@ -285,7 +285,7 @@ def test_unsupported_function_and_prefixed_aggregation():
 
 def test_composite_key_join():
     # The example links returns to order lines on both key columns (ADR-009).
-    o = edit(MODEL, "      order_lines: [order_id, line_no]\n", "      order_lines: [order_id]\n")
+    o = edit(MODEL, "order_lines: [order_id, line_no] }", "order_lines: [order_id] }")
     assert messages(o, MODEL) == [
         "model `sales`, entity `returns`: the key of `order_lines` has 2 columns (order_id, line_no), but the "
         "join gives 1; write `order_lines: [<column for order_id>, <column for line_no>]`",
@@ -397,7 +397,8 @@ def test_route_notice_names_the_chosen_path_and_changes_with_a_new_join():
     # A direct join from billing items to order headers makes a new, shorter route to `orders` and
     # everything behind it. The validator says so instead of switching silently.
     text = (ERP / ERP_MODEL).read_text(encoding="utf-8")
-    changed = text.replace("      order_items: [AUBEL, AUPOS]\n", "      order_items: [AUBEL, AUPOS]\n      orders: AUBEL\n")
+    changed = text.replace("joins: { calendar: FKDAT, order_items: [AUBEL, AUPOS] }",
+                           "joins: { calendar: FKDAT, order_items: [AUBEL, AUPOS], orders: AUBEL }")
     assert changed != text
     after = infos({ERP_MODEL: changed})
     assert ("model `erp`, entity `billing_items`: reaches `orders` by 2 routes; using the shortest, billing_items → "

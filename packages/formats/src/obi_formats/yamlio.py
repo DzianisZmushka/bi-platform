@@ -411,16 +411,34 @@ class Writer:
     # A collection may be written in flow style only if it holds scalars, no comments
     # are attached inside it, and the whole line fits.
     def _flow(self, v, path: Path) -> str | None:
+        """Flow style for a collection of scalars, or a mapping whose values are scalars or
+        non-empty lists of scalars (ADR-003 rule 5 as amended by the ADR-012 review)."""
         if not v or path in self.commented_parents:
             return None
-        values = v.values() if isinstance(v, dict) else v
-        if not all(_is_scalar(x) and x is not None and not (isinstance(x, str) and "\n" in x)
-                   for x in values):
-            return None
+
+        def plain(x) -> bool:
+            return _is_scalar(x) and x is not None and not (isinstance(x, str) and "\n" in x)
+
         if isinstance(v, dict):
-            inner = ", ".join(f"{format_scalar(k, True)}: {format_scalar(x, True)}" for k, x in v.items())
+            for k, x in v.items():
+                if isinstance(x, list):
+                    # Lists inline only in nested mappings; top-level sections stay block style.
+                    if len(path) < 2 or not x or not all(plain(i) for i in x) \
+                            or path + (k,) in self.commented_parents:
+                        return None
+                elif not plain(x):
+                    return None
+            inner = ", ".join(f"{format_key(k)}: {self._flow_value(x)}" for k, x in v.items())
             return "{ " + inner + " }"
+        if not all(plain(x) for x in v):
+            return None
         return "[" + ", ".join(format_scalar(x, True) for x in v) + "]"
+
+    @staticmethod
+    def _flow_value(x) -> str:
+        if isinstance(x, list):
+            return "[" + ", ".join(format_scalar(i, True) for i in x) + "]"
+        return format_scalar(x, True)
 
     def _entry(self, head: str, v, schema, indent: int, path: Path) -> list[str]:
         """Lines for `head` (`key:` or `-`) followed by its value."""

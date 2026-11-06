@@ -56,9 +56,7 @@ entities:
       The date of a return is its return date.
     table: returns
     key: return_id
-    joins:
-      calendar: return_date
-      order_lines: [order_id, line_no]
+    joins: { calendar: return_date, order_lines: [order_id, line_no] }
     dimensions:
       reason: { label: Return reason }
     measures:
