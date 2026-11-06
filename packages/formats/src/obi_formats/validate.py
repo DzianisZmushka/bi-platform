@@ -83,6 +83,7 @@ def validate_project(root: str | Path, overrides: dict[str, str] | None = None) 
     rels = ["project.yaml"]
     rels += sorted(p.relative_to(root).as_posix() for p in root.glob("model/*.model.yaml"))
     rels += sorted(p.relative_to(root).as_posix() for p in root.glob("dashboards/*/dashboard.yaml"))
+    rels += sorted(p.relative_to(root).as_posix() for p in root.glob("forms/*.form.yaml"))
     rels += [r for r in overrides if r not in rels and artifact_type(r)]
 
     arts: list[_Artifact] = []
@@ -120,6 +121,14 @@ def validate_project(root: str | Path, overrides: dict[str, str] | None = None) 
     for art in (a for a in arts if a.type == "project"):
         _check_project(art, root)
 
+    forms = {a.id: a for a in arts if a.type == "form"}
+    for art in forms.values():
+        stem = Path(art.file).name.removesuffix(".form.yaml")
+        if art.id != stem:
+            art.report((), None, f"id `{art.id}` does not match its file name `{stem}.form.yaml`; rename one of them")
+        _check_form(art, models)
+    for art in (a for a in arts if a.type == "project"):
+        _check_seeds(art, models, root)
     dashboards = {a.id: a.data for a in arts if a.type == "dashboard"}
     # Dashboards whose file did not load already have their own error; links to them are
     # not reported again.
@@ -130,7 +139,7 @@ def validate_project(root: str | Path, overrides: dict[str, str] | None = None) 
         if art.id != folder:
             art.report(("dashboard",), None, f"dashboard id `{art.id}` does not match its folder "
                                               f"`{folder}`; rename one of them")
-        _DashboardCheck(art, models, dashboards, broken).run()
+        _DashboardCheck(art, models, dashboards, broken, forms).run()
 
     return sorted(issues, key=lambda i: (i.file, i.line or 0))
 
@@ -138,6 +147,7 @@ def validate_project(root: str | Path, overrides: dict[str, str] | None = None) 
 def _load(rel: str, text: str, issues: list[Issue]) -> _Artifact | None:
     atype = artifact_type(rel)
     fallback = (Path(rel).name.removesuffix(".model.yaml") if atype == "model"
+                else Path(rel).name.removesuffix(".form.yaml") if atype == "form"
                 else Path(rel).parent.name if atype == "dashboard" else "project")
     try:
         doc = parse(text)
@@ -155,9 +165,27 @@ def _load(rel: str, text: str, issues: list[Issue]) -> _Artifact | None:
                             "this file looks like a model, not a dashboard (it has `entities` or "
                             "`hierarchies`); models live in `model/<id>.model.yaml`"))
         return None
-    aid = data.get(atype) if isinstance(data.get(atype), str) else fallback
-    label = f"{atype} `{aid}`"
+    key = ("form" if "form" in data else "sheet") if atype == "form" else atype
+    aid = data.get(key) if isinstance(data.get(key), str) else fallback
+    label = f"{key} `{aid}`"
+    for path, dup, line, first in doc.duplicates:
+        issues.append(Issue("error", rel, line, label, _element_of(path),
+                            f"`{dup}` appears twice{f' in `{path[-1]}`' if path and isinstance(path[-1], str) else ''} "
+                            f"(first on line {first}); the first is used, remove one"))
     return _Artifact(atype, rel, aid, doc, _Reporter(issues, rel, label, doc))
+
+
+_ELEMENTS = {"entities": "entity", "measures": "measure", "dimensions": "dimension", "columns": "column",
+             "rollups": "rollup", "hierarchies": "hierarchy", "transitions": "transition", "connections": "connection",
+             "tables": "table"}
+
+
+def _element_of(path: tuple) -> str | None:
+    """`entity `shipment_plans`` for a duplicate inside ("entities", "shipment_plans", "columns")."""
+    for i in range(len(path) - 2, -1, -1):
+        if path[i] in _ELEMENTS and isinstance(path[i + 1], str):
+            return f"{_ELEMENTS[path[i]]} `{path[i + 1]}`"
+    return None
 
 
 def _catalog(root: Path, project: dict, issues: list[Issue]) -> tuple[str, dict[str, list[str] | None] | None]:
@@ -186,8 +214,12 @@ def _catalog(root: Path, project: dict, issues: list[Issue]) -> tuple[str, dict[
 
 def _check_structure(art: _Artifact):
     schema = get_schema(art.type)
-    _check_element(schema, art.report, art.data, schema.root_name, (), None)
-    _check_unsupported(schema, art.report, art.data, schema.root(), ())
+    root = schema.root_name_for(art.data)
+    if art.type == "form" and root == schema.root_name:
+        art.report((), None, "a form file starts with `form: <id>` (one record) or `sheet: <id>` (many rows)")
+        return
+    _check_element(schema, art.report, art.data, root, (), None)
+    _check_unsupported(schema, art.report, art.data, schema.defs[root], ())
 
 
 def _check_unsupported(schema: Schema, report: _Reporter, value: Any, s: dict, path: tuple):
@@ -368,6 +400,135 @@ def _check_project(art: _Artifact, root: Path):
                            f"table `{table}` points to `{rel}`, which does not exist")
 
 
+# =========================================================================== forms (ADR-012)
+
+AUDIT = ("created_by", "created_at", "updated_by", "updated_at")
+_WIDGET_TYPES = {"text": ("string", "text"), "textarea": ("string", "text"), "number": ("number", "integer", "id"),
+                 "date": ("date", "timestamp"), "checkbox": ("boolean",), "select": None}
+
+
+class _AnyFilter(list):
+    """Filter ids in a form are checked against each dashboard that embeds it, not here."""
+
+    def __contains__(self, item):
+        return True
+
+
+_ANY = _AnyFilter()
+
+
+def _form_entity(models: dict[str, ModelIndex], name):
+    found = [m for m in models.values() if name in m.entities]
+    return (found[0], found[0].entities[name]) if len(found) == 1 else (None, None)
+
+
+def _check_form(art: _Artifact, models: dict[str, ModelIndex]):
+    d, report = art.data, art.report
+    entity = d.get("entity")
+    idx, e = _form_entity(models, entity)
+    if idx is None:
+        pool = {n for m in models.values() for n in m.entities}
+        report(("entity",), None, f"entity `{entity}` not found in any model" + did_you_mean(str(entity), pool))
+        return
+    if not idx.is_writable(entity):
+        report(("entity",), None, f"entity `{entity}` is not writable; forms write only to entities with "
+                                  f"`writable: true`")
+        return
+    cols = idx.table_columns(entity)
+    declared = e.get("columns") if isinstance(e.get("columns"), dict) else {}
+    status = (e.get("workflow") or {}).get("column") if isinstance(e.get("workflow"), dict) else None
+
+    def column(name, path, label):
+        if name in AUDIT:
+            report(path, label, f"`{name}` is an audit column; the platform writes it")
+            return False
+        if name not in cols:
+            report(path, label, f"entity `{entity}` has no column `{name}`"
+                   + did_you_mean(str(name), [c for c in cols if c not in AUDIT]))
+            return False
+        return True
+
+    if "form" in d:
+        for i, f in enumerate(d.get("fields") or []):
+            if not isinstance(f, dict) or not isinstance(f.get("field"), str):
+                continue
+            name, path, label = f["field"], ("fields", i), f"field `{f['field']}`"
+            if not column(name, path, label):
+                continue
+            if name == status:
+                report(path, label, f"`{name}` is the workflow column; it changes only through transitions, "
+                                    f"which the form shows as buttons")
+                continue
+            spec = declared.get(name) if isinstance(declared.get(name), dict) else {"type": "string"}
+            ctype = spec.get("type", "string")
+            widget = f.get("widget")
+            if widget == "select" and not (spec.get("choices") or spec.get("references")):
+                report(path + ("widget",), label, f"widget `select` needs `choices` or `references` on column `{name}`")
+            elif widget and _WIDGET_TYPES.get(widget) is not None and ctype not in _WIDGET_TYPES[widget]:
+                usable = [w for w, ts in _WIDGET_TYPES.items() if ts and ctype in ts]
+                report(path + ("widget",), label, f"widget `{widget}` does not fit column type `{ctype}`; "
+                                                  f"use {' or '.join(usable)}")
+            if f.get("required") is False and spec.get("required") is True:
+                report(path + ("required",), label, f"column `{name}` is required; a form may make a column "
+                                                    f"required, not optional")
+            for msg in check_expression(f.get("default"), names=("filters", "user"), filter_ids=_ANY):
+                report(path + ("default",), label, f"`default`: {msg}")
+    else:
+        shown = [c for c in d.get("columns") or [] if isinstance(c, str)]
+        for i, c in enumerate(shown):
+            column(c, ("columns", i), None)
+        for i, c in enumerate(d.get("readonly") or []):
+            if c not in shown:
+                report(("readonly", i), None, f"`readonly`: `{c}` is not one of the sheet's `columns`")
+        for i, f in enumerate(d.get("filters") or []):
+            if isinstance(f, dict) and isinstance(f.get("column"), str):
+                if column(f["column"], ("filters", i, "column"), f"filter `{f.get('filter')}`"):
+                    _check_sheet_filter_default(f, idx, entity, cols, ("filters", i, "default"), report)
+        sort = d.get("sort")
+        if isinstance(sort, str) and sort.lstrip("-") not in cols:
+            report(("sort",), None, f"`sort`: `{sort.lstrip('-')}` is not a column of entity `{entity}`"
+                   + did_you_mean(sort.lstrip("-"), cols))
+
+
+def _check_sheet_filter_default(f: dict, idx: ModelIndex, entity: str, cols: dict, path: tuple, report):
+    """A sheet filter's default on a date column must be something the sheet can evaluate: a
+    date, a range, a preset, or a fiscal preset when the column joins a fiscal calendar."""
+    default, column = f.get("default"), f["column"]
+    if cols.get(column) not in ("date", "timestamp") or not isinstance(default, str) or "${" in default:
+        return
+    label = f"filter `{f.get('filter')}`"
+    fiscal = any(isinstance(fd.spec.get("fiscal"), dict) for target, fk in idx.joins(entity).items()
+                 if fk == column for fd in idx.fields(target) if fd.kind == "dimension")
+    if default in FISCAL_PRESETS and not fiscal:
+        report(path, label, f"`default: {default}` needs a fiscal calendar: column `{column}` must join an entity "
+                            f"whose date dimension has `fiscal:`")
+    elif default not in DATE_PRESETS + FISCAL_PRESETS \
+            and not re.match(r"^\d{4}-\d{2}-\d{2}(\.\.\d{4}-\d{2}-\d{2})?$", default):
+        presets = DATE_PRESETS + (FISCAL_PRESETS if fiscal else ())
+        report(path, label, f"`default` for a date column must be a date (2026-01-31), a range "
+                            f"(2026-01-01..2026-03-31) or one of {', '.join(presets)}; got `{default}`"
+               + did_you_mean(default, presets))
+
+
+def _check_seeds(art: _Artifact, models: dict[str, ModelIndex], root: Path):
+    conns = art.data.get("connections") if isinstance(art.data.get("connections"), dict) else {}
+    writable = {m.entities[e].get("table") for m in models.values() for e in m.entities if m.is_writable(e)}
+    for cname, c in conns.items():
+        if not isinstance(c, dict) or not isinstance(c.get("seeds"), dict):
+            continue
+        db = (c.get("duckdb") or {}).get("database") if isinstance(c.get("duckdb"), dict) else None
+        for table, rel in c["seeds"].items():
+            path = ("connections", cname, "seeds", table)
+            if table not in writable:
+                art.report(path, f"connection `{cname}`", f"`seeds`: `{table}` is not the table of a writable "
+                                                          f"entity" + did_you_mean(table, writable))
+            elif isinstance(rel, str) and not (root / rel).is_file():
+                art.report(path, f"connection `{cname}`", f"seed for `{table}` points to `{rel}`, which does not exist")
+            if not db:
+                art.report(path, f"connection `{cname}`", "`seeds` need `duckdb: { database: <file> }`: writable "
+                                                          "tables live in a database file")
+
+
 # =========================================================================== dashboards
 
 _FIELD_SPEC = {
@@ -377,18 +538,19 @@ _FIELD_SPEC = {
     "chart": {"x": (("measure", "dimension", "hierarchy"), False),
               "y": (("measure", "dimension", "hierarchy"), True),
               "series": (("dimension",), False), "detail": (("dimension",), False)},
+    "text": {"rows": (("dimension",), True)},  # record text (ADR-012): dimensions only, first row
     "table": {"rows": (("dimension", "hierarchy"), True), "columns": (("dimension",), True),
               "values": (("measure",), True)},
 }
-_WIDGETS = ("kpi", "chart", "table", "text", "button")
+_WIDGETS = ("kpi", "chart", "table", "text", "button", "form")
 _CONTAINERS = ("row", "grid", "tabs", "tab", "card", "section")
 
 
 class _DashboardCheck:
     def __init__(self, art: _Artifact, models: dict[str, ModelIndex], dashboards: dict[str, Any],
-                 broken: set[str] = frozenset()):
+                 broken: set[str] = frozenset(), forms: dict[str, _Artifact] | None = None):
         self.art, self.d, self.report = art, art.data, art.report
-        self.dashboards, self.broken = dashboards, broken
+        self.dashboards, self.broken, self.forms = dashboards, broken, forms or {}
         model = self.d.get("model")
         self.idx = models.get(model) if isinstance(model, str) else None
         if isinstance(model, str) and self.idx is None:
@@ -479,7 +641,53 @@ class _DashboardCheck:
             else:
                 self._widget(kind, node, npath, label, page)
 
+    def _date_filters(self) -> set[str]:
+        return {fid for fid, r in self.filter_refs.items() if r.field.dtype in ("date", "timestamp")}
+
+    def _form_widget(self, w: dict, path: tuple, label: str):
+        fid = w["form"]
+        form = self.forms.get(fid)
+        if form is None:
+            self.report(path, label, f"no form `{fid}` in this project (forms/<id>.form.yaml)"
+                        + did_you_mean(fid, self.forms))
+            return
+        self._exprs(w, path, label, {"title", "visible"}, names=("filters", "user"))
+        # Defaults that read `${filters.*}` read this dashboard's filters.
+        values = [(f.get("field"), f.get("default")) for f in form.data.get("fields") or [] if isinstance(f, dict)]
+        values += [(f.get("filter"), f.get("default")) for f in form.data.get("filters") or [] if isinstance(f, dict)]
+        for name, default in values:
+            for msg in check_expression(default, names=("filters", "user"), filter_ids=list(self.filters),
+                                        date_filters=self._date_filters()):
+                self.report(path, label, f"form `{fid}`, `{name}` default: {msg}")
+        nav = (form.data.get("on_submit") or {}).get("navigate") if isinstance(form.data.get("on_submit"), dict) else None
+        if isinstance(nav, str) and "/" not in nav and nav not in self.page_ids:
+            self.report(path, label, f"form `{fid}`: `on_submit` navigates to page `{nav}`, which is not in this "
+                                     f"dashboard" + did_you_mean(nav, self.page_ids))
+
+    def _record_text_reach(self, w, path, label, page, refs):
+        """Record text (dimensions only): every filter that applies must reach the first row's
+        entity, as for measures (ADR-005)."""
+        if self.idx is None or not refs:
+            return
+        base = refs[0][1].field.entity
+        reach = set(self.idx.reachable(base))
+        ignore = w.get("ignore_filters") if isinstance(w.get("ignore_filters"), list) else []
+        for p, r in refs[1:]:
+            if r.field.entity not in reach:
+                self.report(path + ("rows",), label, f"`{r.text}` cannot be reached from `{refs[0][1].text}`'s "
+                                                     f"entity `{base}`; record text reads one entity and its joins")
+        bad = [fid for fid, fref in self.filter_refs.items()
+               if fid not in ignore and (not self.filters[fid].get("pages") or page in self.filters[fid]["pages"])
+               and fref.field.entity not in reach]
+        if bad:
+            fix = [f for f in self.filters if f in bad or f in ignore]
+            self.report(path, label, f"{'filters' if len(bad) > 1 else 'filter'} {', '.join(f'`{b}`' for b in bad)} "
+                                     f"cannot reach entity `{base}`; add `ignore_filters: [{', '.join(fix)}]` to the widget")
+
     def _widget(self, kind: str, w: dict, path: tuple, label: str, page: str):
+        if kind == "form":
+            self._form_widget(w, path, label)
+            return
         refs: list[tuple[str, Ref]] = []     # (prop, ref)
         shown: list[str] = []                # field refs as written, for sort / cells
         for prop, (want, many) in _FIELD_SPEC.get(kind, {}).items():
@@ -514,11 +722,17 @@ class _DashboardCheck:
 
         self._check_sort_and_cells(w, path, label, shown, refs)
         self._check_grain(w, path, label, page, refs, where_refs)
+        if kind == "text" and refs:
+            self._record_text_reach(w, path, label, page, refs)
 
         # `row` holds the fields the widget queries; a KPI's sparkline is a separate series.
         row_fields = sorted({n for p, r in refs if p != "sparkline" for n in self._names(r)})
         data_names = ("value", "row", "filters", "user")
-        self._exprs(w, path, label, {"title", "visible", "content"}, names=("filters", "user"))
+        if kind == "text" and w.get("rows"):  # record text: `${row.*}` is the first row
+            self._exprs(w, path, label, {"content"}, names=("row", "filters", "user"), row_fields=row_fields)
+            self._exprs(w, path, label, {"title", "visible", "empty"}, names=("filters", "user"))
+        else:
+            self._exprs(w, path, label, {"title", "visible", "content"}, names=("filters", "user"))
         if kind in ("kpi", "chart"):
             self._exprs(w, path, label, {"color"}, names=data_names, row_fields=row_fields, color=True)
         if isinstance(w.get("cells"), dict):
@@ -686,7 +900,8 @@ class _DashboardCheck:
                             f"`{prefix}visible` must be an expression such as `${{filters.region.count > 0}}`")
                 continue
             for msg in check_expression(v, names=names, row_fields=row_fields,
-                                        filter_ids=list(self.filters), color=color):
+                                        filter_ids=list(self.filters), color=color,
+                                        date_filters=self._date_filters()):
                 self.report(path + (prop,), label, f"`{prefix}{prop}`: {msg}")
 
 
@@ -697,7 +912,8 @@ def _and(items: list[str]) -> str:
 # =========================================================================== expressions
 
 
-def check_expression(value: Any, *, names, row_fields=(), filter_ids=(), color=False) -> list[str]:
+def check_expression(value: Any, *, names, row_fields=(), filter_ids=(), color=False,
+                     date_filters=frozenset()) -> list[str]:
     """Static checks of a property value that may contain `${...}` (ADR-005 §4)."""
     if not isinstance(value, str):
         return []
@@ -710,7 +926,7 @@ def check_expression(value: Any, *, names, row_fields=(), filter_ids=(), color=F
         parts = parse_template(value)
     except ExprError as e:
         return [f"invalid expression: {e}"]
-    c = _ExprCheck(names, row_fields, filter_ids)
+    c = _ExprCheck(names, row_fields, filter_ids, date_filters)
     for part in parts:
         if isinstance(part, tuple):
             c.walk(part)
@@ -735,8 +951,10 @@ def _is_filter_list(node) -> bool:
 
 
 class _ExprCheck:
-    def __init__(self, names, row_fields, filter_ids):
-        self.names, self.row_fields, self.filter_ids = tuple(names), list(row_fields), list(filter_ids)
+    def __init__(self, names, row_fields, filter_ids, date_filters=frozenset()):
+        self.names, self.row_fields = tuple(names), list(row_fields)
+        self.filter_ids = filter_ids if isinstance(filter_ids, _AnyFilter) else list(filter_ids)
+        self.date_filters = set(date_filters)
         self.msgs: list[str] = []
 
     def walk(self, node, consumed: bool = False):
@@ -769,9 +987,17 @@ class _ExprCheck:
                 self.walk(obj, True)
             elif _is_filter_list(obj):
                 self.walk(obj, True)
-                if attr not in FILTER_MEMBERS:
-                    self.msgs.append(f"`filters.{obj[2]}.{attr}` is not available; use `.label`, `.count`, "
-                                     f"`.first` or `.includes(x)`")
+                fid = obj[2]
+                if fid in self.date_filters and attr in ("first", "count"):
+                    self.msgs.append(f"`filters.{fid}` is a date range; use `filters.{fid}.start` or "
+                                     f"`filters.{fid}.end` instead of `.{attr}`")
+                elif fid not in self.date_filters and attr in ("start", "end") \
+                        and not isinstance(self.filter_ids, _AnyFilter):
+                    self.msgs.append(f"`.{attr}` is only for date filters; `filters.{fid}` is a list of values, "
+                                     f"use `.first`, `.label`, `.count` or `.includes(x)`")
+                elif attr not in FILTER_MEMBERS:
+                    self.msgs.append(f"`filters.{fid}.{attr}` is not available; use `.label`, `.count`, "
+                                     f"`.first`, `.includes(x)`, or `.start`/`.end` for date filters")
             else:
                 self.walk(obj, True)
                 self.msgs.append(f"`.{attr}` is not available here")

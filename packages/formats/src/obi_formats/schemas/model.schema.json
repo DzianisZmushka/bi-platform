@@ -69,7 +69,9 @@
           "items": {
             "type": "string",
             "minLength": 1
-          }
+          },
+          "description": "Required, except on a writable entity with `per:` (the key comes from that entity).",
+          "x-write-rule": true
         },
         "grain": {
           "$ref": "#/$defs/refs",
@@ -77,6 +79,29 @@
         },
         "currency": {
           "$ref": "#/$defs/entity_currency"
+        },
+        "writable": {
+          "type": "boolean",
+          "default": false,
+          "description": "The platform owns this table: `obi migrate` creates it from `columns`, with audit columns and a history table, and forms may write to it."
+        },
+        "per": {
+          "$ref": "#/$defs/id",
+          "description": "Writable entity with one row per row of another entity: its key is that entity's key (key columns created automatically), that entity joins it, and every write checks the row exists.",
+          "x-write-rule": true
+        },
+        "columns": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/column_name"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/column"
+          },
+          "description": "Typed columns of a writable entity. Each column is also a dimension of the same name (type from the column); `dimensions:` on a writable entity is only for renames and audit columns. The rules here apply to every path that writes: form, sheet, paste, CSV import, later the API."
+        },
+        "workflow": {
+          "$ref": "#/$defs/workflow"
         },
         "joins": {
           "type": "object",
@@ -127,8 +152,7 @@
         }
       },
       "required": [
-        "table",
-        "key"
+        "table"
       ],
       "additionalProperties": false
     },
@@ -155,6 +179,7 @@
             "string",
             "number",
             "date",
+            "timestamp",
             "boolean"
           ],
           "default": "string"
@@ -263,6 +288,11 @@
       "type": "string",
       "pattern": "^[a-z][a-z0-9_]*$",
       "x-error": "is not a valid name: use lowercase letters, digits and underscores, starting with a letter"
+    },
+    "column_name": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+      "x-error": "is not a column name: use letters, digits and underscores, starting with a letter or underscore (SAP-style `VKORG` is fine)"
     },
     "artifact_id": {
       "type": "string",
@@ -397,6 +427,129 @@
       },
       "required": [
         "from"
+      ],
+      "additionalProperties": false
+    },
+    "column": {
+      "type": "object",
+      "x-element": "column",
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "id",
+            "string",
+            "text",
+            "number",
+            "integer",
+            "date",
+            "timestamp",
+            "boolean"
+          ],
+          "description": "`id`: a number the platform assigns on insert. `text`: long string (textarea).",
+          "x-write-rule": true
+        },
+        "required": {
+          "type": "boolean",
+          "default": false,
+          "x-write-rule": true
+        },
+        "default": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ],
+          "description": "A literal, or ${...} over `user` (no `filters`: a column default applies on every write path)."
+        },
+        "choices": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": [
+              "string",
+              "number"
+            ]
+          },
+          "x-write-rule": true
+        },
+        "references": {
+          "$ref": "#/$defs/ref",
+          "description": "A dimension of another entity: the column stores that entity's key, forms show the dimension.",
+          "x-write-rule": true
+        },
+        "check": {
+          "$ref": "#/$defs/sql",
+          "description": "Column expression that must be true, e.g. `revenue_target >= 0`.",
+          "x-write-rule": true
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": false
+    },
+    "workflow": {
+      "type": "object",
+      "x-element": "workflow",
+      "description": "A status column that only changes through declared transitions.",
+      "properties": {
+        "column": {
+          "$ref": "#/$defs/id",
+          "x-write-rule": true
+        },
+        "transitions": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "$ref": "#/$defs/id"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/transition"
+          }
+        }
+      },
+      "required": [
+        "column",
+        "transitions"
+      ],
+      "additionalProperties": false
+    },
+    "transition": {
+      "type": "object",
+      "x-element": "transition",
+      "properties": {
+        "from": {
+          "type": [
+            "string",
+            "array"
+          ],
+          "minLength": 1,
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          },
+          "x-write-rule": true
+        },
+        "to": {
+          "type": "string",
+          "minLength": 1
+        },
+        "by": {
+          "type": "string",
+          "description": "${...} over `user`: who may perform it. Absent: anyone who may edit the row.",
+          "x-write-rule": true
+        }
+      },
+      "required": [
+        "from",
+        "to"
       ],
       "additionalProperties": false
     }

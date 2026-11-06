@@ -20,6 +20,8 @@ from markdown_it import MarkdownIt
 
 from obi_engine import EngineError, Filter, Project, SemanticQuery, humanize
 from obi_engine import dates
+
+from .forms import FormContext, load_forms, render_form, render_sheet
 from obi_formats.modelindex import FISCAL_GRAINS
 from obi_formats.artifacts import parse
 from obi_formats.expr import ExprError, FilterSelection, render as render_expr
@@ -52,7 +54,8 @@ RENDERED: dict[str, set[str]] = {
               "ignore_filters", "sort", "limit", "on_click", "visible", "color"},
     "table": {"table", "title", "description", "rows", "columns", "values", "where", "ignore_filters",
               "sort", "limit", "totals", "on_click", "visible", "cells"},
-    "text": {"text", "title", "content", "visible"},
+    "text": {"text", "title", "rows", "where", "ignore_filters", "sort", "content", "empty", "visible"},
+    "form": {"form", "title", "visible"},
     "button": {"button", "label", "on_click", "visible"},
     "cell": {"color", "bar"},
     "on_click": {"navigate", "set"},
@@ -70,7 +73,10 @@ class _Page:
 
     def __init__(self, project: Project, dash_id: str, dash: dict, dashboards: dict[str, dict],
                  inputs: dict[str, list[str]] | None, as_of: date, mode: str,
-                 drill: dict[str, list[str]] | None = None):
+                 drill: dict[str, list[str]] | None = None, user: dict | None = None,
+                 here: str = "", form_state: dict | None = None, query: dict | None = None):
+        self.user, self.here, self.form_state, self.query = user or {}, here, form_state or {}, query or {}
+        self.forms = load_forms(project.root)
         self.project, self.dash_id, self.dash, self.dashboards = project, dash_id, dash, dashboards
         self.drill = drill or {}  # widget id -> values chosen at each hierarchy level
         self.eng = project.engine(dash["model"])
@@ -89,8 +95,17 @@ class _Page:
         self.selections: dict[str, FilterSelection] = {}
         self.ranges: dict[str, tuple[date, date]] = {}
         self.fiscal: set[str] = set()  # filters set to a fiscal preset
+        # A filter value that cannot be evaluated is an error, never "match everything": the
+        # widgets it applies to show the error instead of unfiltered numbers.
+        self.invalid: dict[str, str] = {}
         for fid, f in self.filter_specs.items():
-            self._prepare_filter(fid, f)
+            try:
+                self._prepare_filter(fid, f)
+            except (ValueError, EngineError) as e:
+                self.selections[fid] = FilterSelection()
+                dtype = self.eng.idx.resolve(f["dimension"], ("dimension",)).field.dtype
+                self.invalid[fid] = _filter_problem(self.inputs[fid], e, dtype)
+                self.errors.append(f"filter `{fid}`: {self.invalid[fid]}")
 
     def _prepare_filter(self, fid: str, f: dict):
         values = self.inputs[fid]
@@ -121,6 +136,9 @@ class _Page:
             pages = f.get("pages")
             if pages and page not in pages:
                 continue
+            if fid in self.invalid and fid not in ignore:
+                raise FilterUnusable(f"filter `{fid}` cannot be evaluated ({self.invalid[fid]}); "
+                                 f"choose another value")
             if fid in self.engine_filters and fid not in ignore:
                 out.append(fid)
         return out
@@ -136,7 +154,7 @@ class _Page:
     # ---- expressions
 
     def ctx(self, value=None, row=None) -> dict:
-        return {"value": value, "row": row or {}, "user": {}, "filters": self.selections}
+        return {"value": value, "row": row or {}, "user": self.user, "filters": self.selections}
 
     def expr(self, text, value=None, row=None, default=None):
         if text is None:
@@ -183,7 +201,9 @@ class _Page:
 
 def render_dashboard(root: str | Path, dash_id: str, inputs: dict[str, list[str]] | None = None,
                      as_of: date | None = None, mode: str = "static",
-                     drill: dict[str, list[str]] | None = None, footer: str = "") -> RenderResult:
+                     drill: dict[str, list[str]] | None = None, footer: str = "", user: dict | None = None,
+                     here: str = "", form_state: dict | None = None,
+                     query: dict | None = None) -> RenderResult:
     root = Path(root)
     project = Project(root)
     dashboards = {}
@@ -191,7 +211,8 @@ def render_dashboard(root: str | Path, dash_id: str, inputs: dict[str, list[str]
         d = parse(p.read_text(encoding="utf-8")).data
         dashboards[d["dashboard"]] = d
     dash = dashboards[dash_id]
-    page = _Page(project, dash_id, dash, dashboards, inputs, as_of or date.today(), mode, drill)
+    page = _Page(project, dash_id, dash, dashboards, inputs, as_of or date.today(), mode, drill,
+                 user=user, here=here, form_state=form_state, query=query)
     body = []
     for p in dash["pages"]:
         if p.get("visible") is not None and not page.expr(p["visible"], default=True):
@@ -258,11 +279,12 @@ def _node(page: _Page, node: dict, page_id: str) -> str:
                          + "".join(_node(page, c, page_id) for c in t["items"]) + "</div>" for t in tabs)
         return f'<div class="tabs" id="w-{esc(nid)}"><div class="tab-bar">{buttons}</div>{panels}</div>'
     try:
-        inner = {"kpi": _kpi, "chart": _chart, "table": _table, "text": _text, "button": _button}[kind](
+        inner = {"kpi": _kpi, "chart": _chart, "table": _table, "text": _text, "button": _button,
+                 "form": _form}[kind](
             page, node, page_id)
     except Exception as e:  # one broken widget must not hide the rest of the dashboard
-        msg = f"{kind} `{nid}`: {e}"
-        page.errors.append(msg)
+        if not isinstance(e, FilterUnusable):  # that one is listed once, for the filter
+            page.errors.append(f"{kind} `{nid}`: {e}")
         inner = f'<div class="widget-error">Could not render {esc(kind)} <code>{esc(nid)}</code>: {esc(str(e))}</div>'
     info = (f'<span class="info" title="{esc(node["description"])}">&#9432;</span>'
             if node.get("description") else "")
@@ -584,7 +606,28 @@ def _cell(page: _Page, val, fmt: str, cfg: dict | None, row: dict, maxabs: float
     return f'<td class="num" style="{style}">{esc(_format(page, val, fmt))}</td>'
 
 
+def _form(page: _Page, f: dict, page_id: str) -> str:
+    """An embedded form or sheet (ADR-012): its `${filters.*}` defaults read this dashboard."""
+    spec = page.forms[f["form"]]
+    # The browser never sends `#page` to the server, so the return address names the page.
+    here = (page.here.split("#")[0] or f"/{page.dash_id}") + f"#{page_id}"
+    ctx = FormContext(page.project, page.user, page.selections, page.mode, here, page.form_state, page.query,
+                      page.as_of)
+    if "sheet" in spec:
+        return render_sheet(ctx, f["form"], spec)
+    href = page.href(spec.get("on_submit")) if spec.get("on_submit") else None
+    return render_form(ctx, f["form"], spec, href)
+
+
 def _text(page: _Page, t: dict, page_id: str) -> str:
+    if t.get("rows"):  # record text: the first row of a dimensions-only query (ADR-012)
+        rows = _query(page, t, page_id, [], list(t["rows"]), _sort(page, t.get("sort")), 1)
+        title = f'<div class="widget-title">{esc(page.expr(t["title"]))}</div>' if t.get("title") else ""
+        if not rows:
+            return title + f'<div class="markdown empty">{_md.render(str(page.expr(t.get("empty") or "")))}</div>'
+        row = {k: (v.strftime("%Y-%m-%d %H:%M") if isinstance(v, datetime) else v) for k, v in rows[0].items()}
+        content = page.expr(t["content"], row=row, default=t["content"])
+        return title + f'<div class="markdown">{_md.render(str(content))}</div>'
     content = page.expr(t["content"], default=t["content"])
     title = f'<div class="widget-title">{esc(page.expr(t["title"]))}</div>' if t.get("title") else ""
     return title + f'<div class="markdown">{_md.render(str(content))}</div>'
@@ -660,6 +703,8 @@ def _dim_text(page: _Page, ref: str, v) -> str:
         return "–"
     if isinstance(v, bool):
         return "Yes" if v else "No"
+    if isinstance(v, datetime) and not _dim_ref(page, ref).grain:
+        return v.strftime("%Y-%m-%d %H:%M")
     if isinstance(v, (date, datetime)):
         grain = _dim_ref(page, ref).grain or "day"
         return {"year": f"{v.year}", "quarter": f"{v.year} Q{(v.month - 1) // 3 + 1}",
@@ -669,6 +714,19 @@ def _dim_text(page: _Page, ref: str, v) -> str:
 
 def _json_row(r: dict) -> dict:
     return {k: (v.isoformat() if isinstance(v, (date, datetime)) else v) for k, v in r.items()}
+
+
+class FilterUnusable(ValueError):
+    """A widget's filter has a value that cannot be evaluated; the widget shows this instead of data."""
+
+
+def _filter_problem(values: list[str], e: Exception, dtype: str) -> str:
+    v = values[0] if values else ""
+    if isinstance(e, EngineError):
+        return f"`{v}`: {e}"
+    if dtype == "date":
+        return f"`{v}` is not a date, a date range (`2026-01-01..2026-03-31`) or a date preset"
+    return f"`{v}` is not a valid {dtype}"
 
 
 def _typed(v: str, dtype: str):
@@ -773,3 +831,22 @@ def _document(page: _Page, body: str, footer: str = "") -> str:
 <script>{js}</script>
 </body></html>
 """
+
+
+def render_form_page(root: str | Path, fid: str, user: dict, here: str, form_state: dict | None,
+                     query: dict, footer: str = "", as_of: date | None = None) -> str:
+    """A form or sheet opened on its own (`/forms/<id>`): no dashboard, so `${filters.*}` are empty."""
+    project = Project(Path(root))
+    forms = load_forms(root)
+    if fid not in forms:
+        return f"<!doctype html><title>Not found</title><p>No form <code>{esc(fid)}</code>.</p>"
+    spec = forms[fid]
+    ctx = FormContext(project, user, {}, "serve", here, form_state, query, as_of)
+    inner = render_sheet(ctx, fid, spec) if "sheet" in spec else render_form(ctx, fid, spec)
+    css = files("obi_cli").joinpath("assets/style.css").read_text("utf-8")
+    js = files("obi_cli").joinpath("assets/app.js").read_text("utf-8")
+    title = esc(spec.get("title") or fid)
+    return (f"<!doctype html><html lang='en'><head><meta charset='utf-8'><title>{title}</title><style>{css}</style>"
+            f"</head><body><header><div class='title'><h1>{title}</h1></div></header><main>"
+            f"<div class='widget'>{inner}</div></main><footer>{footer}</footer>"
+            f"<script id='charts' type='application/json'>{{}}</script><script>{js}</script></body></html>")

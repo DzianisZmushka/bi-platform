@@ -20,12 +20,20 @@ The model hides the technical column names. Its decisions are in [ADR-009](../..
 | billing counted in the order's period | `date: order_date` on the measure |
 | amounts in document currency | model `currency: { target: USD, rates: { table, currency, month, rate } }` (`rate` × amount = amount in `target`), entity `currency: { code, date }` (each entity converts at its own date), measure `convert: USD` |
 | fiscal periods | `fiscal: { year, period }` on the date dimension; `date.fiscal_period`; presets such as `fiscal_year_to_date` |
+| a note per order item | `order_notes: { writable: true, per: order_items, columns: ... }`. The key is `VBELN`, `POSNR`; order items join it automatically (LEFT, so items without a note still show) |
+| planned shipments per sales org and week | writable `shipment_plans` (`VKORG`, `week_start`) seeded from `data/shipment_plans.csv`, edited in the `shipment-plan` sheet (no delete) and charted against deliveries by `date.week` on the page `shipment_plan`. Weeks are Monday-based, so the week of 2026-03-30 falls in the old fiscal year (see the ADR-009 follow-up) |
+| draft → submitted → approved | `workflow: { column: status, transitions: { approve: { from: submitted, to: approved, by: "${user.role == 'sales_manager'}" } } }` |
 
 `order_value` is in document currency, so it may only appear in a widget that also shows `document_currency`. Use `order_value_usd` everywhere else.
 
 Orders convert at the order date and billing at the billing date. `billable_value_usd − billed_value_usd` therefore includes FX differences. `open_order_value_usd` is computed per item from quantities, so it is exact.
 
+Click a row in **Largest open order items** to open the `order-note` form for that item. Save it as a draft, then submit it. The note and its status appear in the table. A sales manager then approves or reopens it:
+
 ```bash
 uv run obi validate examples/erp-sales --execute
-uv run obi serve examples/erp-sales
+uv run obi serve examples/erp-sales --user bob --user-attr role=sales
+uv run obi serve examples/erp-sales --user mia --user-attr role=sales_manager
 ```
+
+Run one server at a time: DuckDB lets one process open `.obi/erp-sales.duckdb`.

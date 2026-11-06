@@ -38,11 +38,6 @@
     "calendar": {
       "date": "DATE"
     },
-    "targets": {
-      "month": "DATE",
-      "region_id": "VARCHAR",
-      "revenue_target": "BIGINT"
-    },
     "returns": {
       "return_id": "VARCHAR",
       "return_date": "DATE",

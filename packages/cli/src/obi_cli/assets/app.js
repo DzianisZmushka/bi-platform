@@ -56,3 +56,12 @@
   window.addEventListener("hashchange", function () { show(location.hash.slice(1)); });
   show(location.hash.slice(1));
 })();
+
+// Sheets: "Import CSV" reads the chosen file into the paste box; the server parses it.
+function obiReadFile(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function () { input.form.querySelector("textarea[name=_rows]").value = reader.result; };
+  reader.readAsText(file);
+}

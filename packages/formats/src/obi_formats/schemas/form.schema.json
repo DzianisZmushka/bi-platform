@@ -1,0 +1,292 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://obi.dev/schemas/form.schema.json",
+  "title": "Form",
+  "description": "forms/<id>.form.yaml: `form: <id>` enters one record, `sheet: <id>` edits many rows of a writable entity. Property order in each definition is the canonical key order (ADR-003).",
+  "$ref": "#/$defs/form_file",
+  "$defs": {
+    "form_file": {
+      "type": "object",
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "form"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/form"
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "sheet"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/sheet"
+          }
+        },
+        {
+          "if": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "form"
+                  ]
+                },
+                {
+                  "required": [
+                    "sheet"
+                  ]
+                }
+              ]
+            }
+          },
+          "then": false
+        }
+      ]
+    },
+    "form": {
+      "type": "object",
+      "x-kind": "form",
+      "properties": {
+        "form": {
+          "$ref": "#/$defs/artifact_id"
+        },
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "entity": {
+          "$ref": "#/$defs/id"
+        },
+        "fields": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/field"
+          },
+          "x-write-rule": true
+        },
+        "on_submit": {
+          "$ref": "#/$defs/on_submit"
+        }
+      },
+      "required": [
+        "form",
+        "entity",
+        "fields"
+      ],
+      "additionalProperties": false
+    },
+    "field": {
+      "type": "object",
+      "x-kind": "field",
+      "x-element": "field",
+      "properties": {
+        "field": {
+          "$ref": "#/$defs/column_name",
+          "description": "A column of the form's entity (including key columns created by `per`)."
+        },
+        "label": {
+          "type": "string"
+        },
+        "help": {
+          "type": "string"
+        },
+        "widget": {
+          "enum": [
+            "text",
+            "number",
+            "date",
+            "select",
+            "checkbox",
+            "textarea"
+          ],
+          "description": "Default from the column: choices or references -> select, text -> textarea, number/integer -> number, date -> date, boolean -> checkbox, otherwise text."
+        },
+        "default": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ],
+          "description": "Literal or ${...} over `filters` (of the hosting dashboard) and `user`. Overrides the column default."
+        },
+        "required": {
+          "type": "boolean",
+          "description": "May make an optional column required in this form; may not relax a required column.",
+          "x-write-rule": true
+        },
+        "readonly": {
+          "type": "boolean",
+          "default": false,
+          "x-write-rule": true
+        },
+        "visible": {
+          "type": "string",
+          "description": "A literal, or ${...} (docs/formats/expressions.md)."
+        }
+      },
+      "required": [
+        "field"
+      ],
+      "additionalProperties": false
+    },
+    "on_submit": {
+      "type": "object",
+      "description": "After a successful save. Absent: stay, show the saved record, refresh the dashboard around the form.",
+      "properties": {
+        "navigate": {
+          "type": "string",
+          "pattern": "^([a-z][a-z0-9]*(-[a-z0-9]+)*/)?[a-z][a-z0-9_]*$",
+          "x-error": "must be a page id (`open_orders`) or `dashboard-id/page_id`"
+        },
+        "set": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/id"
+          },
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          }
+        }
+      },
+      "required": [
+        "navigate"
+      ],
+      "additionalProperties": false
+    },
+    "sheet": {
+      "type": "object",
+      "x-kind": "sheet",
+      "properties": {
+        "sheet": {
+          "$ref": "#/$defs/artifact_id"
+        },
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "entity": {
+          "$ref": "#/$defs/id"
+        },
+        "columns": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/column_name"
+          },
+          "description": "Columns shown, in order. Key and required columns that are not shown get their defaults.",
+          "x-write-rule": true
+        },
+        "readonly": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/column_name"
+          },
+          "x-write-rule": true
+        },
+        "filters": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/sheet_filter"
+          }
+        },
+        "sort": {
+          "type": "string",
+          "pattern": "^-?[A-Za-z_][A-Za-z0-9_]*$",
+          "x-error": "is not a sort column: use a column name, prefixed with `-` for descending"
+        },
+        "allow": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "edit",
+              "add",
+              "delete",
+              "paste",
+              "import"
+            ]
+          },
+          "description": "Absent: all of edit, add, delete, paste (TSV from the clipboard) and import (CSV). Row history is always available.",
+          "x-write-rule": true
+        }
+      },
+      "required": [
+        "sheet",
+        "entity",
+        "columns"
+      ],
+      "additionalProperties": false
+    },
+    "sheet_filter": {
+      "type": "object",
+      "x-kind": "filter",
+      "x-element": "filter",
+      "properties": {
+        "filter": {
+          "$ref": "#/$defs/id"
+        },
+        "title": {
+          "type": "string"
+        },
+        "column": {
+          "$ref": "#/$defs/column_name"
+        },
+        "default": {
+          "type": [
+            "string",
+            "number",
+            "boolean",
+            "array"
+          ],
+          "items": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "description": "A value, a date preset for date columns, or ${...} over the hosting dashboard's `filters` and `user`."
+        }
+      },
+      "required": [
+        "filter",
+        "column"
+      ],
+      "additionalProperties": false
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "x-error": "is not a valid id: use lowercase letters, digits and underscores, starting with a letter"
+    },
+    "artifact_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+      "x-error": "is not a valid form id: use lowercase kebab-case such as `kpi-comment`"
+    },
+    "column_name": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+      "x-error": "is not a column name: letters, digits and underscores, as in the model's `columns` or key"
+    }
+  }
+}

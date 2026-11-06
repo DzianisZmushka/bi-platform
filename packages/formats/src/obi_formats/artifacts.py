@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from .schema import all_element_keys, get_schema
-from .yamlio import Comments, Document, Writer, load
+from .yamlio import FormatError, Comments, Document, Writer, load
 
 
 def parse(text: str) -> Document:
@@ -22,4 +22,7 @@ def dump(data: Any, artifact_type: str, comments: dict[tuple, Comments] | None =
 
 def canonicalize(text: str, artifact_type: str) -> str:
     doc = parse(text)
+    if doc.duplicates:  # formatting would silently drop the second one
+        _, key, line, first = doc.duplicates[0]
+        raise FormatError(f"duplicate key `{key}` (first on line {first}); remove one", line)
     return dump(doc.data, artifact_type, doc.comments, doc.footer)

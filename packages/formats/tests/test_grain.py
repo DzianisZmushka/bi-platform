@@ -1,11 +1,12 @@
 """Grain derivation (ADR-005 §2)."""
 
+import os
 from pathlib import Path
 
 from obi_formats.artifacts import parse
 from obi_formats.modelindex import ModelIndex
 
-DEMO = Path(__file__).resolve().parents[3] / "examples" / "sales-demo"
+DEMO = Path(os.environ["OBI_EXAMPLES"]) / "sales-demo"
 
 
 def index() -> ModelIndex:

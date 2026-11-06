@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-FILTER_MEMBERS = ("label", "count", "first")
+FILTER_MEMBERS = ("label", "count", "first", "start", "end")
 FILTER_METHODS = ("includes",)
 
 
@@ -228,6 +228,14 @@ class FilterSelection(list):
     @property
     def first(self):
         return self[0] if self else None
+
+    @property
+    def start(self):  # date filters hold [start, end]
+        return self[0] if self else None
+
+    @property
+    def end(self):
+        return self[-1] if self else None
 
     def includes(self, value) -> bool:
         return value in self

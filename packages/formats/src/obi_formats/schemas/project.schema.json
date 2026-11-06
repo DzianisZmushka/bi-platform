@@ -9,33 +9,59 @@
       "type": "object",
       "x-kind": "project",
       "properties": {
-        "project": { "$ref": "#/$defs/artifact_id" },
-        "title": { "type": "string" },
-        "description": { "type": "string" },
-        "default_connection": { "$ref": "#/$defs/id" },
-        "currency": { "type": "string", "pattern": "^[A-Z]{3}$", "x-error": "must be an ISO 4217 code such as `USD`" },
+        "project": {
+          "$ref": "#/$defs/artifact_id"
+        },
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "default_connection": {
+          "$ref": "#/$defs/id"
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$",
+          "x-error": "must be an ISO 4217 code such as `USD`"
+        },
         "connections": {
           "type": "object",
           "minProperties": 1,
-          "propertyNames": { "$ref": "#/$defs/id" },
-          "additionalProperties": { "$ref": "#/$defs/connection" }
+          "propertyNames": {
+            "$ref": "#/$defs/id"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/connection"
+          }
         }
       },
-      "required": ["project", "default_connection", "connections"],
+      "required": [
+        "project",
+        "default_connection",
+        "connections"
+      ],
       "additionalProperties": false
     },
     "connection": {
       "type": "object",
       "x-element": "connection",
-      "x-kind-keys": ["duckdb"],
+      "x-kind-keys": [
+        "duckdb"
+      ],
       "properties": {
         "duckdb": {
-          "type": ["object", "null"],
-          "description": "Empty: in-memory database.",
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "Empty: in-memory database. `database`: a DuckDB file that holds the writable tables (keep it under .obi/; data never goes in Git).",
           "properties": {
             "database": {
               "type": "string",
-              "x-unsupported": "Phase 0 runs DuckDB in memory; list the files under `tables` instead"
+              "minLength": 1,
+              "description": "Path of the DuckDB database file, relative to the project root. Created by `obi migrate`."
             }
           },
           "additionalProperties": false
@@ -43,8 +69,24 @@
         "tables": {
           "type": "object",
           "description": "File-backed tables: <table name>: <path relative to the project root>.",
-          "propertyNames": { "$ref": "#/$defs/id" },
-          "additionalProperties": { "type": "string", "minLength": 1 }
+          "propertyNames": {
+            "$ref": "#/$defs/id"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "seeds": {
+          "type": "object",
+          "description": "Initial rows for writable tables: <table>: <CSV file>. `obi migrate` loads a seed only into a table it has just created.",
+          "propertyNames": {
+            "$ref": "#/$defs/id"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       },
       "additionalProperties": false

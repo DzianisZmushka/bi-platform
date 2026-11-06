@@ -18,7 +18,7 @@ from typing import Any
 
 from jsonschema import Draft202012Validator
 
-ARTIFACT_TYPES = ("project", "model", "dashboard")
+ARTIFACT_TYPES = ("project", "model", "dashboard", "form")
 
 
 def artifact_type(path: str | PurePath) -> str | None:
@@ -27,6 +27,8 @@ def artifact_type(path: str | PurePath) -> str | None:
         return "project"
     if name.endswith(".model.yaml"):
         return "model"
+    if name.endswith(".form.yaml"):
+        return "form"
     if name == "dashboard.yaml":
         return "dashboard"
     return None
@@ -52,6 +54,18 @@ class Schema:
             extra = {k: v for k, v in s.items() if k != "$ref"}
             s = {**target, **extra} if extra else target
         return s if isinstance(s, dict) else {}
+
+    def root_name_for(self, data) -> str:
+        """The root definition for a document: form files hold either `form:` or `sheet:`."""
+        kinds = self.dispatch({"$ref": f"#/$defs/{self.root_name}"}) if "allOf" in self.defs[self.root_name] else None
+        if kinds and isinstance(data, dict):
+            for k in data:
+                if k in kinds:
+                    return kinds[k]
+        return self.root_name
+
+    def root_for(self, data) -> dict:
+        return self.defs[self.root_name_for(data)]
 
     def root(self) -> dict:
         return self.defs[self.root_name]
@@ -141,7 +155,7 @@ class Schema:
     def normalize(self, data: Any, s: dict | None = None) -> Any:
         """Drop properties equal to their schema default; empty collections are dropped,
         except that an all-default entry of an author-named map becomes empty (None)."""
-        s = self.resolve(self.root() if s is None else s)
+        s = self.resolve(self.root_for(data) if s is None else s)
         if isinstance(data, dict):
             props = s.get("properties") or {}
             named_map = not props and isinstance(s.get("additionalProperties"), dict)

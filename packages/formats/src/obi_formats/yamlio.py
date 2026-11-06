@@ -57,6 +57,9 @@ class Document:
     comments: dict[Path, Comments] = field(default_factory=dict)  # by slot path
     footer: list[str] = field(default_factory=list)
     lines: dict[Path, int] = field(default_factory=dict)  # by data path (ints for list items)
+    # Problems that do not stop loading: (data path of the mapping, key, line, line of the first).
+    # A duplicate key keeps its first occurrence, so one bad line does not hide the whole file.
+    duplicates: list[tuple[Path, str, int, int]] = field(default_factory=list)
 
     def line_of(self, path: Path) -> int | None:
         path = tuple(path)
@@ -124,7 +127,7 @@ def load(text: str, element_keys: frozenset[str] = frozenset()) -> Document:
 
     b = _Builder(element_keys)
     data = b.build(node, (), (), 0, [])
-    doc = Document(data=data, lines=b.lines)
+    doc = Document(data=data, lines=b.lines, duplicates=b.duplicates)
     _attach_comments(doc, text, b)
     return doc
 
@@ -133,6 +136,7 @@ class _Builder:
     def __init__(self, element_keys: frozenset[str]):
         self.element_keys = element_keys
         self.lines: dict[Path, int] = {}
+        self.duplicates: list[tuple[Path, str, int, int]] = []
         self.slots: list[_Slot] = []
         # (start_line, start_col, end_line, end_col, slot chain, block indicator width)
         self.scalars: list[tuple[int, int, int, int, tuple[int, ...], int]] = []
@@ -148,7 +152,9 @@ class _Builder:
                     raise FormatError("mapping keys must be plain strings", knode.start_mark.line + 1)
                 key = knode.value
                 if key in out:
-                    raise FormatError(f"duplicate key `{key}`", knode.start_mark.line + 1)
+                    self.duplicates.append((data_path, key, knode.start_mark.line + 1,
+                                            self.lines[data_path + (key,)]))
+                    continue
                 slot = self._slot(slot_path + (key,), knode, vnode, depth)
                 self.lines[data_path + (key,)] = knode.start_mark.line + 1
                 self._scalar_span(knode, chain + [slot])
@@ -404,7 +410,8 @@ class Writer:
 
     def write(self, data: dict, footer: list[str] | None = None) -> str:
         out: list[str] = []
-        self._mapping(data, self.shape.root(), 0, (), out, top=True)
+        root = self.shape.root_for(data) if hasattr(self.shape, "root_for") else self.shape.root()
+        self._mapping(data, root, 0, (), out, top=True)
         out.extend(footer or [])
         return "\n".join(out) + "\n"
 

@@ -2,6 +2,7 @@
 composite-key and expression joins, currency conversion, and the fiscal calendar."""
 
 from datetime import date
+import os
 from pathlib import Path
 
 import pytest
@@ -10,7 +11,7 @@ from obi_engine import Engine, Filter, Project, SemanticQuery
 from obi_formats.artifacts import parse
 from obi_formats.modelindex import ModelIndex
 
-ERP = Path(__file__).resolve().parents[3] / "examples" / "erp-sales"
+ERP = Path(os.environ["OBI_EXAMPLES"]) / "erp-sales"
 AS_OF = date(2026, 11, 5)
 ORDER = ("FROM vbap p JOIN vbak k ON p.VBELN = k.VBELN "
          "JOIN tcurr fx ON fx.FCURR = k.WAERK AND fx.GDATU = date_trunc('month', k.ERDAT)")

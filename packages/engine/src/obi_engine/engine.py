@@ -15,6 +15,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 import re
+import threading
 
 import duckdb
 import pyarrow as pa
@@ -37,7 +38,11 @@ HANDLED_MODEL: dict[str, set[str]] = {
     "model": {"model", "title", "currency", "entities", "hierarchies"},
     "currency": {"target", "rates"},
     "rates": {"table", "currency", "month", "rate"},
-    "entity": {"table", "key", "grain", "currency", "joins", "rollups", "dimensions", "measures"},
+    "entity": {"table", "key", "grain", "currency", "writable", "per", "columns", "workflow", "joins", "rollups",
+               "dimensions", "measures"},
+    "column": {"label", "description", "type", "required", "default", "choices", "references", "check"},
+    "workflow": {"column", "transitions"},
+    "transition": {"from", "to", "by"},
     "rollup": {"sum", "count", "min", "max", "from"},
     "entity_currency": {"code", "date"},
     "dimension": {"label", "column", "type", "fiscal", "lookup", "key", "match"},
@@ -47,13 +52,15 @@ HANDLED_MODEL: dict[str, set[str]] = {
 }
 HANDLED_PROJECT: dict[str, set[str]] = {
     "project": {"project", "title", "description", "default_connection", "currency", "connections"},
-    "connection": {"duckdb", "tables"},
+    "connection": {"duckdb", "tables", "seeds"},
+    "connection.duckdb": {"database"},
 }
 # Read by people and LLMs; no runtime behaviour by design, so not "silently ignored".
 DOCUMENTATION_ONLY: dict[str, set[str]] = {
     "model": {"description"},
     "entity": {"description"},
     "dimension": {"description"},
+    "column": {"description"},
     "measure": {"description"},
 }
 
@@ -89,6 +96,51 @@ def _lit(v) -> str:
     return exp.convert(v).sql("duckdb")
 
 
+# One in-memory DuckDB per project directory and process: file tables are loaded once (and
+# reloaded when a file changes); the project's database file is attached as `store` and holds
+# the writable tables (ADR-012). Each Project gets its own cursor on it, so `obi serve` sees a
+# saved row on the next request without a restart.
+_BASES: dict[str, dict] = {}
+_BASES_LOCK = threading.Lock()
+
+
+def _base(root: Path, conn: dict, database: Path | None) -> duckdb.DuckDBPyConnection:
+    key = str(root.resolve())
+    with _BASES_LOCK:
+        state = _BASES.get(key)
+        if state is None or state["database"] != database:
+            if state is not None:
+                state["con"].close()
+            state = {"con": duckdb.connect(), "mtimes": {}, "database": database}
+            if database is not None:
+                database.parent.mkdir(parents=True, exist_ok=True)
+                state["con"].execute(f"ATTACH '{database.as_posix()}' AS {STORE}")
+            _BASES[key] = state
+        con = state["con"]
+        for table, rel in (conn.get("tables") or {}).items():
+            path = root / rel
+            mtime = path.stat().st_mtime if path.is_file() else None
+            if state["mtimes"].get(table) == mtime:
+                continue
+            reader = "read_parquet" if str(rel).endswith(".parquet") else "read_csv_auto"
+            # A table, not a view: a view would re-read the file on every query.
+            con.execute(f"CREATE OR REPLACE TABLE memory.main.{_q(table)} AS SELECT * FROM "
+                        f"{reader}('{path.as_posix().replace(chr(39), chr(39) * 2)}')")
+            state["mtimes"][table] = mtime
+        return con
+
+
+def forget(root: str | Path):
+    """Close the project's database (tests, `obi migrate --reseed` from a fresh state)."""
+    with _BASES_LOCK:
+        state = _BASES.pop(str(Path(root).resolve()), None)
+        if state is not None:
+            state["con"].close()
+
+
+STORE = "store"
+
+
 class Project:
     """A project directory: connection plus its models."""
 
@@ -96,13 +148,12 @@ class Project:
         self.root = Path(root)
         self.config = parse((self.root / "project.yaml").read_text(encoding="utf-8")).data
         self.currency = self.config.get("currency", "USD")
-        self.con = duckdb.connect()
-        conn = self.config["connections"][self.config["default_connection"]]
-        for table, rel in (conn.get("tables") or {}).items():
-            path = (self.root / rel).as_posix().replace("'", "''")
-            reader = "read_parquet" if rel.endswith(".parquet") else "read_csv_auto"
-            # Loaded once per Project: a view would re-read the file on every query.
-            self.con.execute(f"CREATE TABLE {_q(table)} AS SELECT * FROM {reader}('{path}')")
+        self.connection = self.config["connections"][self.config["default_connection"]]
+        duck = self.connection.get("duckdb")
+        db = duck.get("database") if isinstance(duck, dict) else None
+        self.database: Path | None = (self.root / db) if db else None
+        self.con = _base(self.root, self.connection, self.database).cursor()
+        self.con.execute("USE memory.main")
         self._models: dict[str, Engine] = {}
 
     def describe(self) -> dict:
@@ -110,7 +161,7 @@ class Project:
         conn = self.config["connections"][self.config["default_connection"]]
         tables = {}
         for table in conn.get("tables") or {}:
-            rows = self.con.sql(f"DESCRIBE {_q(table)}").fetchall()
+            rows = self.con.sql(f"DESCRIBE memory.main.{_q(table)}").fetchall()
             tables[table] = {r[0]: r[1] for r in rows}
         return {"connection": self.config["default_connection"], "tables": tables}
 
@@ -118,13 +169,22 @@ class Project:
         if model not in self._models:
             path = self.root / "model" / f"{model}.model.yaml"
             data = parse(path.read_text(encoding="utf-8")).data
-            self._models[model] = Engine(self.con, ModelIndex(model, data))
+            self._models[model] = Engine(self.con, ModelIndex(model, data),
+                                         store=STORE if self.database is not None else None)
         return self._models[model]
+
+    def models(self) -> list[str]:
+        return sorted(p.name.removesuffix(".model.yaml") for p in (self.root / "model").glob("*.model.yaml"))
 
 
 class Engine:
-    def __init__(self, con: duckdb.DuckDBPyConnection, idx: ModelIndex):
-        self.con, self.idx = con, idx
+    def __init__(self, con: duckdb.DuckDBPyConnection, idx: ModelIndex, store: str | None = None):
+        self.con, self.idx, self.store = con, idx, store
+
+    def table(self, entity: str) -> str:
+        """SQL name of an entity's table: writable tables live in the project's database file."""
+        name = _q(self.idx.entities[entity]["table"])
+        return f"{self.store}.main.{name}" if self.store and self.idx.is_writable(entity) else name
 
     # ------------------------------------------------------------------ public
 
@@ -157,12 +217,12 @@ class Engine:
         if lk:
             table, value, key, match = lk
             col = f"l.{_q(value)}"
-            sql = (f"SELECT DISTINCT {col} AS v FROM {_q(e['table'])} AS t JOIN {_q(table)} AS l "
+            sql = (f"SELECT DISTINCT {col} AS v FROM {self.table(ref.field.entity)} AS t JOIN {_q(table)} AS l "
                    f"ON l.{_q(key)} = {_qualify(parse_colexpr(match), 't')} WHERE {col} IS NOT NULL "
                    f"ORDER BY 1 LIMIT {limit}")
             return [r[0] for r in self.con.sql(sql).fetchall()]
         col = f"t.{_q(self._column(ref.field))}"
-        sql = (f"SELECT DISTINCT {col} AS v FROM {_q(e['table'])} AS t WHERE {col} IS NOT NULL "
+        sql = (f"SELECT DISTINCT {col} AS v FROM {self.table(ref.field.entity)} AS t WHERE {col} IS NOT NULL "
                f"ORDER BY 1 LIMIT {limit}")
         return [r[0] for r in self.con.sql(sql).fetchall()]
 
@@ -194,8 +254,8 @@ class Engine:
         return f.spec.get("column", f.name)
 
     def sql(self, q: SemanticQuery) -> str:
-        if not q.measures:
-            raise EngineError("a query needs at least one measure")
+        if not q.measures and not q.dimensions:
+            raise EngineError("a query needs a measure or a dimension")
         dims = [self._dim(d) for d in q.dimensions]
         names = _output_names(dims)
         filters = [(self._dim(f.dimension), f) for f in q.filters]
@@ -209,6 +269,8 @@ class Engine:
         by_fact: dict[tuple, list[Field]] = {}
         for f in base:  # measures with their own date route get their own query (ADR-009)
             by_fact.setdefault((f.entity, self.idx.date_route(f)), []).append(f)
+        if not by_fact:  # dimensions only: distinct rows of the first dimension's entity and its joins
+            by_fact[(dims[0].field.entity, None)] = []
         ctes = [self._fact_cte(fact, ms, base, dims, names, filters, route)
                 for (fact, route), ms in by_fact.items()]
 
@@ -284,7 +346,7 @@ class Engine:
                     on = " AND ".join(
                         f"{_qualify(_checked_join(x, src, dst), aliases[src])} = {aliases[dst]}.{_q(k)}"
                         for x, k in zip(fks, self.idx.key_columns(dst)))
-                    joins.append(f"LEFT JOIN {_q(self.idx.entities[dst]['table'])} AS {aliases[dst]} ON {on}")
+                    joins.append(f"LEFT JOIN {self.table(dst)} AS {aliases[dst]} ON {on}")
             return aliases[entity]
 
         def dim_sql(d: Ref, why: str) -> str:
@@ -335,7 +397,7 @@ class Engine:
                 vals = ", ".join(_lit(v) for v in f.values)
                 where.append(f"{col} IN ({vals})" if f.values else "FALSE")
 
-        sql = f"SELECT {', '.join(select)} FROM {_q(self.idx.entities[fact]['table'])} AS t0"
+        sql = f"SELECT {', '.join(select)} FROM {self.table(fact)} AS t0"
         if joins:
             sql += " " + " ".join(joins)
         if where:
@@ -456,7 +518,7 @@ class Engine:
         fiscal = r.field.spec.get("fiscal")
         if not isinstance(fiscal, dict):
             raise EngineError(f"dimension `{r.field.name}` has no fiscal calendar")
-        table = _q(self.idx.entities[r.field.entity]["table"])
+        table = self.table(r.field.entity)
         return table, (_q(fiscal["year"]), _q(fiscal["period"]), _q(self._column(r.field)))
 
     def _rollup_joins(self, fact: str, measures: list[Field], joins: list[str]) -> dict[str, str]:
@@ -477,7 +539,7 @@ class Engine:
             cols = ", ".join(f"{_qualify(parse_colexpr(x), 'c')} AS k{j}" for j, x in enumerate(fks))
             alias = f"ru{i}"
             joins.append(f"LEFT JOIN (SELECT {cols}, {AGG_SQL[kind].format(body)} AS v "
-                         f"FROM {_q(self.idx.entities[child]['table'])} AS c GROUP BY ALL) AS {alias} ON "
+                         f"FROM {self.table(child)} AS c GROUP BY ALL) AS {alias} ON "
                          + " AND ".join(f"{alias}.k{j} = t0.{_q(k)}" for j, k in enumerate(keys)))
             out[name] = f"COALESCE({alias}.v, 0)" if kind in ("sum", "count") else f"{alias}.v"
         return out

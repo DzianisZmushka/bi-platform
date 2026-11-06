@@ -5,6 +5,7 @@ measure to the sales model and compares the engine's result with hand-written SQ
 packages/cli/tests/test_coverage.py fails if a feature has no case here.
 """
 
+import os
 from pathlib import Path
 
 import pytest
@@ -14,7 +15,7 @@ from obi_formats.artifacts import parse
 from obi_formats.colexpr import FEATURES, features_used, parse as parse_colexpr
 from obi_formats.modelindex import ModelIndex
 
-DEMO = Path(__file__).resolve().parents[3] / "examples" / "sales-demo"
+DEMO = Path(os.environ["OBI_EXAMPLES"]) / "sales-demo"
 NET = "o.quantity * o.unit_price * (1 - o.discount)"
 JOINED = ("FROM order_lines o JOIN customers c USING (customer_id) "
           "JOIN calendar k ON o.order_date = k.date")
@@ -69,6 +70,12 @@ FEATURE_CASES: dict[str, tuple[dict, str]] = {
     "left": (
         {"sum": "quantity", "where": "left(segment, 3) = 'Ent'"},
         f"SELECT SUM(o.quantity) {JOINED} WHERE c.segment = 'Enterprise'"),
+    "length": (
+        {"sum": "quantity", "where": "length(segment) = 3"},
+        f"SELECT SUM(o.quantity) {JOINED} WHERE length(c.segment) = 3"),
+    "day": (
+        {"sum": "quantity", "where": "day(date) = 1"},
+        "SELECT SUM(o.quantity) FROM order_lines o WHERE day(o.order_date) = 1"),
     "case": (
         {"sum": "case when discount > 0 then quantity else 0 end"},
         "SELECT SUM(CASE WHEN o.discount > 0 THEN o.quantity ELSE 0 END) FROM order_lines o"),

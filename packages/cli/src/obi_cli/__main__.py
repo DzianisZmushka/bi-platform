@@ -2,8 +2,9 @@
 
     obi validate [PROJECT] [--execute]
     obi catalog  [PROJECT]
+    obi migrate  [PROJECT] [--reseed TABLE]
     obi render   [PROJECT] [--dashboard ID] [--out DIR] [--filter ID=V1,V2] [--as-of DATE]
-    obi serve    [PROJECT] [--port 8765] [--as-of DATE]
+    obi serve    [PROJECT] [--port 8765] [--as-of DATE] [--user NAME] [--user-attr KEY=VALUE]
 
 `obi validate` is static: schemas, references, expressions, and columns from the committed
 catalog.json. It needs no data access, so it is what CI runs. `--execute` also checks
@@ -56,6 +57,14 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("project", nargs="?", default=".")
     s.add_argument("--port", type=int, default=8765)
     s.add_argument("--as-of", type=date.fromisoformat)
+    s.add_argument("--user", default="anonymous", help="the user forms write as (no sign-in before Phase 2)")
+    s.add_argument("--user-attr", action="append", default=[], metavar="KEY=VALUE",
+                   help="a user attribute, e.g. role=sales_manager; read by ${user.*} and workflow `by:`")
+
+    g = sub.add_parser("migrate", help="create or alter the writable tables in the project's database file")
+    g.add_argument("project", nargs="?", default=".")
+    g.add_argument("--reseed", action="append", default=[], metavar="TABLE",
+                   help="empty a writable table (rows go to its history) and load its seed again")
 
     args = ap.parse_args(argv)
     root = Path(args.project)
@@ -79,7 +88,27 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "serve":
         from .server import serve
-        serve(root, args.port, args.as_of)
+        user = {"name": args.user}
+        for item in args.user_attr:
+            k, _, v = item.partition("=")
+            user[k.strip()] = v.strip()
+        serve(root, args.port, args.as_of, user)
+        return 0
+
+    if args.cmd == "migrate":
+        from obi_engine import Project
+        from obi_engine.store import WriteError, migrate
+        errors = _validate(root, execute=False)
+        if errors:
+            print(f"{errors} error(s); fix them before migrating", file=sys.stderr)
+            return 1
+        try:
+            done = migrate(Project(root), tuple(args.reseed))
+        except WriteError as e:
+            print(f"obi: {e}", file=sys.stderr)
+            return 1
+        for line in done or ["the database already matches the model"]:
+            print(line, file=sys.stderr)
         return 0
 
     errors = _validate(root, execute=True)

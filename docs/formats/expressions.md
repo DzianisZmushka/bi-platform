@@ -27,10 +27,14 @@ There are no functions, loops or assignments. Null propagates through arithmetic
 | `on_click.set` on kpi, chart, table | | yes | yes | yes |
 | `on_click.set` on button | | | yes | yes |
 | `title`, `content`, `visible` | | | yes | yes |
+| `content` of record text | | yes | yes | yes |
+| form and sheet `default`, field `visible` | | | yes | yes |
+| column `default` in a model | | | | yes |
+| workflow transition `by` | | | | yes |
 
 - `value` is the number being drawn: the KPI value, the bar, the cell.
 - `row.<field>` is any field the widget shows. The field name is the model name, without entity prefix or time grain.
-- `user.<attribute>` is a user attribute supplied at runtime.
+- `user.<attribute>` is a user attribute supplied at runtime. Until the Phase 2 runtime, `obi serve --user <name> --user-attr role=<role>` supplies it: `user.name` and `user.role`.
 
 ## Filters
 
@@ -42,6 +46,16 @@ There are no functions, loops or assignments. Null propagates through arithmetic
 | `filters.region.count` | number of selected values |
 | `filters.region.first` | first selected value, or null |
 | `filters.region.includes('EMEA')` | true or false |
+
+A date filter holds a range, not a list of values:
+
+| | |
+|---|---|
+| `filters.period.start` | first day of the range, or null when the filter is not set |
+| `filters.period.end` | last day of the range, or null |
+| `filters.period.label` | the selection as shown, such as `This year` |
+
+`.first` and `.count` on a date filter are validator errors that point to `.start` and `.end`, and `.start`/`.end` on any other filter is an error too. A form default such as `month: "${filters.period.start}"` puts the month of the dashboard's period into a new comment.
 
 ## Colors
 
@@ -73,7 +87,7 @@ different in each place:
 | comparison | `= == != <> < <= > >=`, `in (...)`, `between a and b`, `is null`, `is not null` |
 | boolean | `and`, `or`, `not`, `true`, `false` |
 | literals | numbers, `'text'`, `null`. A date is a text literal such as `'2026-03-01'` |
-| functions | `year(x)`, `month(x)`, `quarter(x)`, `date_diff('day'\|'week'\|'month'\|'quarter'\|'year', start, end)`, `coalesce(a, b, ...)`, `left(text, n)`, `case when ... then ... else ... end` |
+| functions | `year(x)`, `month(x)`, `quarter(x)`, `day(x)`, `date_diff('day'\|'week'\|'month'\|'quarter'\|'year', start, end)`, `coalesce(a, b, ...)`, `left(text, n)`, `length(text)`, `case when ... then ... else ... end` |
 
 Anything else is a validation error: "function `upper` is not supported in column expressions". Every name is
 resolved at validation time, with the same "did you mean" help as dashboard references. Every table and column

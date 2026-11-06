@@ -39,10 +39,15 @@ entities:
         format: percent
 
   targets:
-    description: Monthly net revenue targets per region, set by finance.
+    description: Monthly net revenue targets per region, kept by finance in the targets sheet.
     table: targets
     key: [month, region_id]
     grain: [date.month, region]
+    writable: true
+    columns:
+      month: { type: date, required: true, check: day(month) = 1 }
+      region_id: { label: Region, type: string, required: true, references: region }
+      revenue_target: { label: Target, type: number, required: true, check: revenue_target >= 0 }
     joins: { calendar: month, regions: region_id }
     measures:
       revenue_target: { sum: revenue_target, label: Target, format: currency }
@@ -62,6 +67,24 @@ entities:
     measures:
       refunds: { sum: refund_amount, format: currency }
       return_count: { count: return_id, label: Returns, format: integer }
+
+  kpi_comments:
+    description: Comments on KPIs for the monthly review, entered with the KPI comment form.
+    table: kpi_comments
+    key: comment_id
+    writable: true
+    columns:
+      comment_id: { type: id }
+      kpi: { type: string, required: true, choices: [revenue, attainment, margin, returns] }
+      region_id: { label: Region, type: string, references: region }
+      month: { type: date, required: true }
+      comment: { type: text, required: true, check: length(comment) <= 500 }
+    joins: { calendar: month, regions: region_id }
+    dimensions:
+      commented_by: { column: created_by }
+      commented_at: { column: created_at, type: timestamp }
+    measures:
+      comment_count: { count: comment_id, format: integer }
 
   calendar:
     table: calendar

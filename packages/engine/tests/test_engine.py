@@ -1,6 +1,7 @@
 """Semantic engine tests (ADR-001): each (model, query) is checked against hand-written SQL."""
 
 from datetime import date
+import os
 from pathlib import Path
 
 import duckdb
@@ -9,7 +10,7 @@ import pytest
 from obi_engine import EngineError, Filter, Project, SemanticQuery
 from obi_engine import dates
 
-DEMO = Path(__file__).resolve().parents[3] / "examples" / "sales-demo"
+DEMO = Path(os.environ["OBI_EXAMPLES"]) / "sales-demo"
 DATA = (DEMO / "data").as_posix()
 Q1 = (date(2026, 1, 1), date(2026, 3, 31))
 

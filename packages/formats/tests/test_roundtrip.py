@@ -340,3 +340,48 @@ hierarchies:
     assert "hierarchies:\n  h: [a, b]\n" in out
     commented = src.replace("      y: [a, b]\n", "      y: [a,  # first\n          b]\n")
     assert "      y:\n        - a  # first\n        - b\n" in canon(commented, "model")
+
+
+SALES_MODEL = "examples/sales-demo/model/sales.model.yaml"
+ERP_MODEL = "examples/erp-sales/model/erp.model.yaml"
+
+
+@pytest.mark.parametrize("rel, kind, line", [
+    (SALES_MODEL, "model", "    writable: true"),
+    (SALES_MODEL, "model", "    columns:"),
+    (SALES_MODEL, "model", "      month: { type: date, required: true, check: day(month) = 1 }"),
+    (SALES_MODEL, "model", "      region_id: { label: Region, type: string, references: region }"),
+    (SALES_MODEL, "model", "      kpi: { type: string, required: true, choices: [revenue, attainment, margin, returns] }"),
+    (SALES_MODEL, "model", "      commented_at: { column: created_at, type: timestamp }"),
+    (ERP_MODEL, "model", "    per: order_items"),
+    (ERP_MODEL, "model", "        default: draft"),
+    (ERP_MODEL, "model", "    workflow:"),
+    (ERP_MODEL, "model", "      transitions:"),
+    (ERP_MODEL, "model", "        approve: { from: submitted, to: approved, by: \"${user.role == 'sales_manager'}\" }"),
+    (ERP_MODEL, "model", "        reopen: { from: [submitted, approved], to: draft, by: \"${user.role == 'sales_manager'}\" }"),
+    ("examples/sales-demo/project.yaml", "project", "    duckdb: { database: .obi/sales-demo.duckdb }"),
+    ("examples/sales-demo/project.yaml", "project", "    seeds: { targets: data/targets.csv }"),
+    ("examples/sales-demo/forms/kpi-comment.form.yaml", "form", "entity: kpi_comments"),
+    ("examples/sales-demo/forms/kpi-comment.form.yaml", "form", "    default: \"${filters.period.start}\""),
+    ("examples/sales-demo/forms/kpi-comment.form.yaml", "form", "    help: What moved the number, in up to 500 characters."),
+    ("examples/sales-demo/forms/targets.form.yaml", "form", "columns: [month, region_id, revenue_target]"),
+    ("examples/sales-demo/forms/targets.form.yaml", "form", "    column: month"),
+    ("examples/sales-demo/forms/targets.form.yaml", "form", "sort: month"),
+    ("examples/erp-sales/forms/order-note.form.yaml", "form", "    readonly: true"),
+    ("examples/erp-sales/forms/order-note.form.yaml", "form", "    widget: textarea"),
+    ("examples/erp-sales/forms/order-note.form.yaml", "form", "on_submit: { navigate: open_orders }"),
+    ("examples/sales-demo/dashboards/commercial-review/dashboard.yaml", "dashboard",
+     "            where: { kpi: revenue }"),
+    ("examples/sales-demo/dashboards/commercial-review/dashboard.yaml", "dashboard",
+     "            empty: No comment yet for this period."),
+    ("examples/sales-demo/dashboards/commercial-review/dashboard.yaml", "dashboard", "          - form: kpi-comment"),
+])
+def test_comments_on_forms_properties(rel, kind, line):
+    """CLAUDE.md: each forms property (ADR-012) keeps a full-line comment above it and a
+    trailing comment on its line, and a second pass is a no-op."""
+    text = (ROOT / rel).read_text(encoding="utf-8")
+    assert line + "\n" in text
+    indent = line[:len(line) - len(line.lstrip())]
+    commented = text.replace(line + "\n", f"{indent}# above\n{line}  # c\n", 1)
+    out = canon(commented, kind)
+    assert f"{indent}# above\n{line}  # c\n" in out

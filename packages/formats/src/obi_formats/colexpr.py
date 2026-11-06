@@ -31,11 +31,13 @@ FEATURES: dict[str, tuple[type[exp.Expression], ...]] = {
     "quarter": (exp.Quarter,),
     "date_diff": (exp.DateDiff,),
     "coalesce": (exp.Coalesce,),
-    "left": (exp.Left,),  # prefix codes, e.g. SAP product hierarchy levels: left(PRDHA, 5)
+    "left": (exp.Left,),
+    "length": (exp.Length,),  # check rules on text columns: length(comment) <= 500
+    "day": (exp.Day,),        # check rules on date columns: day(month) = 1  # prefix codes, e.g. SAP product hierarchy levels: left(PRDHA, 5)
     "case": (exp.Case, exp.If),
     "reference": (exp.Column, exp.Identifier),
 }
-FUNCTIONS = ("year", "month", "quarter", "date_diff", "coalesce", "left", "case")
+FUNCTIONS = ("year", "month", "quarter", "day", "date_diff", "coalesce", "left", "length", "case")
 DATE_DIFF_UNITS = ("day", "week", "month", "quarter", "year")
 _ALLOWED = tuple(cls for classes in FEATURES.values() for cls in classes)
 

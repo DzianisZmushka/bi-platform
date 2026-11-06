@@ -126,3 +126,14 @@ date:
 - `erp.model.yaml` was 111 lines (101 non-blank), down from 123, before deliveries: lookups saved 15 lines, and billing's own date, the rollup and the `date:`-routed measure added 4. The third LLM test added deliveries (LIPS): a ninth entity, a second rollup and a shipped-not-billed measure, bringing it to 132 lines (121 non-blank) with 18 measures. That growth is new capability, not format overhead.
 - "Open orders" ignores the period filter on its dashboard page, because the open order book is not a period quantity.
 - Rollups, lookups and `date:` routes are small, targeted versions of what a full semantic layer offers (child aggregates, text joins, role-playing dimensions). If more of each is needed, that's evidence for the Cube re-evaluation (ADR-001).
+
+## Follow-up (not scheduled)
+
+**Fiscal weeks from the calendar: `fiscal: { year, period, week: <column> }`.** Today `date.week` is the Monday-based ISO week from `date_trunc`. Fiscal years start on a weekday (1 April 2026 is a Wednesday), so a week such as 2026-03-30 belongs to the old fiscal year by its Monday but holds days of the new one.
+
+The fourth LLM test (the `shipment_plans` sheet) shows the cost:
+- Under `fiscal_year_to_date`, the plan for that week is filtered out by its `week_start`.
+- Deliveries from 1–5 April are still counted, under the same week.
+- Plan attainment is therefore understated at the year boundary.
+
+With a `week` column in the calendar, `date.week` would come from the calendar table like `fiscal_period`, and a week would belong to exactly one fiscal year. A writable `week_start` would join the calendar on that column. Until then, plans that must reconcile with fiscal totals should be kept per fiscal period.

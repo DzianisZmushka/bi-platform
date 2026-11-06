@@ -1,0 +1,18 @@
+form: order-note
+title: Order item note
+description: One note per order item. Submit it for review; a sales manager approves or reopens it.
+entity: order_notes
+
+fields:
+  - field: VBELN
+    label: Sales order
+    default: "${filters.order.first}"
+    readonly: true
+  - field: POSNR
+    label: Item
+    default: "${filters.order_item.first}"
+    readonly: true
+  - field: note
+    widget: textarea
+  - field: next_step
+on_submit: { navigate: open_orders }

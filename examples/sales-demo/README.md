@@ -9,12 +9,13 @@ The full formats are in the JSON Schemas in [packages/formats/src/obi_formats/sc
 - Canonical form: [ADR-003](../../docs/adr/003-canonical-serialization.md) and [ADR-006](../../docs/adr/006-serializer-and-comment-preservation.md)
 - Names, grain and filters: [ADR-005](../../docs/adr/005-references-grain-and-filter-scope.md)
 - Expressions: [expressions.md](../../docs/formats/expressions.md)
+- Forms and writable entities: [forms.md](../../docs/formats/forms.md) and [ADR-012](../../docs/adr/012-forms-and-writable-entities.md)
 
 **Key order** (what `obi-formats fmt` produces, so write it this way): the kind key first (`kpi: id`, `sum: ...`), then `title`/`label`/`description`, then bindings (`measure`, `x`, `y`, `rows`, `values`, `where`, `grain`, `ignore_filters`), then behaviour (`sort`, `limit`, `totals`, `on_click`, `visible`), then presentation (`format`, `color`, `cells`), and `items` last.
 
 ## Project and model files
 
-`project.yaml`: `project: <id>`, `title`, `description`, `default_connection: <name>`, `currency: USD`, and `connections: { <name>: { duckdb:, tables: { <table>: <file> } } }`. `duckdb:` left empty means an in-memory DuckDB that reads the listed CSV or Parquet files. `duckdb: { database: <file> }` is not supported yet; the validator reports it.
+`project.yaml`: `project: <id>`, `title`, `description`, `default_connection: <name>`, `currency: USD`, and `connections: { <name>: { duckdb:, tables: { <table>: <file> } } }`. `duckdb:` left empty means an in-memory DuckDB that reads the listed CSV or Parquet files. `duckdb: { database: .obi/sales-demo.duckdb }` is the file that holds the writable tables (never in Git), and `seeds: { targets: data/targets.csv }` gives a writable table its first rows.
 
 `model/<id>.model.yaml`: `model: <id>`, `title`, `description`, `currency` (optional, see erp-sales), `entities: { <name>: <entity> }` and `hierarchies`.
 
@@ -45,7 +46,8 @@ The full formats are in the JSON Schemas in [packages/formats/src/obi_formats/sc
 | `kpi: <id>` | `measure`, `target` (measure), `compare: previous_period\|previous_year`, `sparkline` (date dimension), `ignore_filters`, `color` |
 | `chart: <id>` | `mark: line\|bar\|area\|point\|arc`, `x`, `y` (one or a list), `series`, `detail`, `stack`, `where`, `ignore_filters`, `sort`, `limit`, `color`. The orientation of a bar follows whichever axis holds the measure |
 | `table: <id>` | `rows`, `columns` (pivot), `values`, `where`, `ignore_filters`, `sort` (`-` = descending), `limit`, `totals`, `cells: { <field>: { color, bar } }` |
-| `text: <id>` | `title`, `content` (Markdown, may contain `${...}`) |
+| `text: <id>` | `title`, `content` (Markdown, may contain `${...}`). As record text it also takes `rows` (dimensions only), `where`, `ignore_filters`, `sort` and `empty`, and `${row.*}` reads the first row |
+| `form: <form id>` | embeds a form or sheet from `forms/`; its `${filters.*}` defaults read this dashboard's filters |
 | `button: <id>` | `label`, `on_click` |
 | `kpi`, `chart`, `table` | `title`, `description` (shown as an ⓘ tooltip) |
 | any widget | `visible: "${...}"` |
@@ -55,4 +57,17 @@ The full formats are in the JSON Schemas in [packages/formats/src/obi_formats/sc
 
 **Defaults that are never written.** Titles derive from ids or bindings. KPI colour follows the sign of the comparison delta, or attainment when there is a `target`. Colour tokens are `ok`, `warning`, `danger`, `neutral`, `accent`.
 
-**Not in Phase 0.** Clicking a chart or table that has no `on_click` and no hierarchy does nothing. Default cross-filtering arrives with the Phase 1 runtime. A property the renderer does not support yet is a validator error ("not supported yet"), never silently ignored.
+**Not in Phase 0.** Clicking a chart or table that has no `on_click` and no hierarchy does nothing. Default cross-filtering arrives with the Phase 2 runtime. A property the renderer does not support yet is a validator error ("not supported yet"), never silently ignored.
+
+## Forms (`forms/<id>.form.yaml`)
+
+Two tables are writable (the full format is in [forms.md](../../docs/formats/forms.md)):
+
+- **`targets`:** the CSV seeds it, and the sheet `targets` on the page `target_entry` edits it. Edit a target and the attainment chart next to it changes.
+- **`kpi_comments`:** the form `kpi-comment` writes to it, and the record text `revenue_comment` shows the latest comment next to the revenue KPI.
+
+```bash
+uv run obi serve examples/sales-demo --user alice
+```
+
+`obi serve` creates and seeds `.obi/sales-demo.duckdb` on first start, and migrates it when the model changes. Delete the file to start over. `obi migrate examples/sales-demo --reseed targets` reloads the targets from the CSV, moving the edited rows to history.

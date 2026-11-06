@@ -1,17 +1,17 @@
 project: sales-demo
 title: Sales demo
-description: Zero-setup demo project. DuckDB reads the CSV files in data/.
+description: Zero-setup demo project. DuckDB reads the CSV files in data/; data entered in forms lives in .obi/.
 default_connection: local
 currency: USD
 
 connections:
   local:
-    duckdb:
+    duckdb: { database: .obi/sales-demo.duckdb }
     tables:
       order_lines: data/order_lines.csv
       customers: data/customers.csv
       products: data/products.csv
       regions: data/regions.csv
       calendar: data/calendar.csv
-      targets: data/targets.csv
       returns: data/returns.csv
+    seeds: { targets: data/targets.csv }

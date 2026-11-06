@@ -1,0 +1,13 @@
+sheet: targets
+title: Revenue targets
+description: Monthly net revenue targets per region. Paste from a spreadsheet or import a CSV.
+entity: targets
+columns: [month, region_id, revenue_target]
+
+filters:
+  - filter: period
+    column: month
+    default: this_year
+  - filter: region
+    column: region_id
+sort: month

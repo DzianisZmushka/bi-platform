@@ -1,0 +1,14 @@
+form: kpi-comment
+title: Comment on a KPI
+description: Explain a number for the monthly review. The comment appears next to its KPI.
+entity: kpi_comments
+
+fields:
+  - field: kpi
+    default: revenue
+  - field: region_id
+    default: "${filters.region.first}"
+  - field: month
+    default: "${filters.period.start}"
+  - field: comment
+    help: What moved the number, in up to 500 characters.

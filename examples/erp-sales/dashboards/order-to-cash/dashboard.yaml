@@ -11,6 +11,12 @@ filters:
     dimension: sales_org
   - filter: country
     dimension: country
+  - filter: order
+    dimension: sales_order
+    pages: [order_note]
+  - filter: order_item
+    dimension: item
+    pages: [order_note]
 
 pages:
   - page: orders_billing
@@ -124,10 +130,45 @@ pages:
         sort: -open_order_value_usd
       - table: open_items
         title: Largest open order items
-        rows: [sales_order, item, order_date, customer, material]
+        rows: [sales_order, item, order_date, customer, material, note_status, note]
         values: [billable_value_usd, billed_value_usd, open_order_value_usd]
         ignore_filters: [period]
         sort: -open_order_value_usd
         limit: 50
+        on_click:
+          navigate: order_note
+          set: { order: "${row.sales_order}", order_item: "${row.item}" }
         cells:
           open_order_value_usd: { bar: true }
+
+  - page: order_note
+    title: Order item note
+    description: Write or update the note for the order item chosen in the open-orders table.
+    items:
+      - form: order-note
+
+  - page: shipment_plan
+    title: Shipment plan
+    description: Planned against delivered shipment value by week. Edit the plan on the left; the chart updates on save.
+    items:
+      - row: plan_kpis
+        items:
+          - kpi: planned
+            measure: planned_shipments_usd
+            ignore_filters: [country]
+          - kpi: delivered
+            measure: delivered_value_usd
+          - kpi: plan_attainment
+            measure: shipment_plan_attainment
+            ignore_filters: [country]
+            color: "${value < 0.9 ? 'danger' : value < 1 ? 'warning' : 'ok'}"
+      - grid: plan_layout
+        columns: [2, 3]
+        items:
+          - form: shipment-plan
+          - chart: plan_vs_delivered
+            title: Planned vs delivered by week
+            mark: line
+            x: date.week
+            y: [planned_shipments_usd, delivered_value_usd]
+            ignore_filters: [country]

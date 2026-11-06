@@ -4,6 +4,7 @@ import html as html_lib
 import re
 import shutil
 from datetime import date
+import os
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -12,7 +13,7 @@ import pytest
 from obi_cli.__main__ import main
 from obi_cli.render import render_dashboard
 
-DEMO = Path(__file__).resolve().parents[3] / "examples" / "sales-demo"
+DEMO = Path(os.environ["OBI_EXAMPLES"]) / "sales-demo"
 AS_OF = date(2026, 11, 5)
 
 
@@ -45,7 +46,7 @@ def test_render_all_dashboards(project, capsys):
     assert [Path(p).name for p in out] == ["commercial-review.html", "revenue-overview.html"]
     html = (project / ".obi/render/commercial-review.html").read_text(encoding="utf-8")
     assert 'class="widget-error"' not in html and 'class="render-errors"' not in html
-    assert html.count('class="widget kpi"') == 16 and html.count('class="widget chart"') == 14
+    assert html.count('class="widget kpi"') == 16 and html.count('class="widget chart"') == 15
     assert 'id="regions"' in html and 'href="revenue-overview.html#overview"' in html
 
 
@@ -61,7 +62,7 @@ def test_ignored_filter_marker_appears_only_when_the_filter_is_set():
     html = render_dashboard(DEMO, "commercial-review", {"channel": ["Online"]}, AS_OF).html
     marked = re.findall(r'id="w-(\w+)"><div class="ignored"[^>]*>Not filtered by: ([^<]+)<', html)
     assert ("revenue", "Channel") in marked and ("attainment_trend", "Channel") in marked
-    assert len(marked) == 8  # exactly the widgets that declare ignore_filters
+    assert len(marked) == 10  # exactly the widgets that declare ignore_filters (incl. record text, Targets page)
     assert not any(w == "region_aov" for w, _ in marked)
 
 
@@ -145,12 +146,12 @@ def test_serve_footer_names_project_and_commit(tmp_path):
     warns when the repository has moved on."""
     from obi_cli.server import git_commit, provenance
 
-    erp = DEMO.parent / "erp-sales"
+    erp = Path(__file__).resolve().parents[3] / "examples" / "erp-sales"  # the repository, not the test copy
     commit = git_commit(erp)
     assert commit and len(commit.split()[0]) >= 7
     footer = provenance(erp, "2026-11-06 10:00", commit)
     assert str(erp.resolve()) in footer and commit.split()[0] in footer and "older code" not in footer
     stale = provenance(erp, "2026-11-05 21:52", "0000000")
     assert "this server runs older code. Restart <code>obi serve</code>" in stale
-    html = render_dashboard(erp, "order-to-cash", None, AS_OF, mode="serve", footer=footer).html
+    html = render_dashboard(DEMO.parent / "erp-sales", "order-to-cash", None, AS_OF, mode="serve", footer=footer).html
     assert 'class="provenance"' in html

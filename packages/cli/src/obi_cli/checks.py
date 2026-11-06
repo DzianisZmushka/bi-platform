@@ -13,6 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from obi_engine import EngineError, Project
+from obi_engine.store import auto_migrate
 from obi_formats import catalog as catalog_mod
 from obi_formats.artifacts import parse
 from obi_formats.validate import Issue, validate_project
@@ -28,6 +29,11 @@ def validate_all(root: str | Path, execute: bool = False) -> list[Issue]:
     except Exception as e:  # a data file DuckDB cannot read
         return issues + [Issue("error", "project.yaml", 1, f"project `{root.name}`", None,
                                f"the data could not be loaded: {_short(e)}")]
+    try:
+        auto_migrate(project)  # the database follows the model, as `obi migrate` would
+    except Exception as e:
+        return issues + [Issue("error", "project.yaml", 1, f"project `{root.name}`", None,
+                               f"the database could not be migrated: {_short(e)}")]
     cached = catalog_mod.load(root)
     if cached is not None:
         changes = catalog_mod.drift(cached, project.describe())

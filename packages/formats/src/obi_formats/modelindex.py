@@ -17,6 +17,11 @@ _GRAIN_RANK = {None: 0, "day": 1, "week": 2, "month": 3, "fiscal_period": 3, "qu
                "fiscal_year": 5}
 MEASURE_KINDS = ("sum", "count", "count_distinct", "avg", "min", "max", "calc")
 ROLLUP_KINDS = ("sum", "count", "min", "max")
+AUDIT_COLUMNS = {"created_by": "string", "created_at": "timestamp", "updated_by": "string",
+                 "updated_at": "timestamp"}  # added by `obi migrate` to every writable table
+COLUMN_TO_DIMENSION = {"id": "number", "string": "string", "text": "string", "number": "number",
+                       "integer": "number", "date": "date", "timestamp": "timestamp", "boolean": "boolean"}
+DATE_TYPES = ("date", "timestamp")
 
 Report = Callable[[tuple, "str | None", str], None]
 
@@ -94,7 +99,49 @@ class ModelIndex:
                 if isinstance(block, dict):
                     for fname, spec in block.items():
                         self.by_name[fname].append(Field(en, fname, kind, spec if isinstance(spec, dict) else {}))
+            self._column_dimensions(en, e)
+        # `per: <parent>`: the parent joins the child on the parent's key (ADR-012).
+        self.per_children: dict[str, list[str]] = defaultdict(list)
+        for en, e in self.entities.items():
+            if e.get("writable") is True and isinstance(e.get("per"), str) and e["per"] in self.entities:
+                self.per_children[e["per"]].append(en)
         self._grain_cache: dict[Field, Grain] = {}
+
+    def _column_dimensions(self, en: str, e: dict):
+        """Columns of a writable entity are dimensions of the same name, unless the entity
+        already has a field of that name or a dimension renames the column (ADR-012)."""
+        cols = e.get("columns")
+        if e.get("writable") is not True or not isinstance(cols, dict):
+            return
+        taken = {f.name for lst in self.by_name.values() for f in lst if f.entity == en}
+        renamed = {(f.spec.get("column") or f.name) for lst in self.by_name.values() for f in lst
+                   if f.entity == en and f.kind == "dimension"}
+        for name, spec in cols.items():
+            spec = spec if isinstance(spec, dict) else {}
+            if name in taken or name in renamed:
+                continue
+            dim = {"column": name, "type": COLUMN_TO_DIMENSION.get(spec.get("type"), "string")}
+            if spec.get("label"):
+                dim["label"] = spec["label"]
+            self.by_name[name].append(Field(en, name, "dimension", dim))
+
+    def is_writable(self, entity: str) -> bool:
+        return self.entities.get(entity, {}).get("writable") is True
+
+    def table_columns(self, entity: str) -> dict[str, str]:
+        """Columns of a writable entity's table and their types: key columns from `per`,
+        declared columns, audit columns."""
+        e = self.entities.get(entity, {})
+        out: dict[str, str] = {}
+        parent = e.get("per")
+        if isinstance(parent, str) and parent in self.entities:
+            for k in self.key_columns(parent):
+                out[k] = "string"
+        cols = e.get("columns") if isinstance(e.get("columns"), dict) else {}
+        for name, spec in cols.items():
+            out[name] = (spec or {}).get("type", "string") if isinstance(spec, dict) else "string"
+        out.update(AUDIT_COLUMNS)
+        return out
 
     # ------------------------------------------------------------------ references
 
@@ -158,7 +205,7 @@ class ModelIndex:
         if grain is not None:
             if grain not in TIME_GRAINS:
                 raise RefError(f"`{grain}` in `{text}` is not a time grain; use one of {', '.join(TIME_GRAINS)}")
-            if not (isinstance(c, Field) and c.kind == "dimension" and c.dtype == "date"):
+            if not (isinstance(c, Field) and c.kind == "dimension" and c.dtype in DATE_TYPES):
                 what = f"{c.dtype} {c.kind}" if isinstance(c, Field) else "hierarchy"
                 raise RefError(f"`{text}`: a time grain needs a date dimension; `{name}` is a {what}")
             if grain in FISCAL_GRAINS and not isinstance(c.spec.get("fiscal"), dict):
@@ -186,12 +233,19 @@ class ModelIndex:
         """Usable joins: single-column foreign key to an entity with a single-column key.
         Composite-key joins are not supported yet (ADR-008) and stay out of the join graph."""
         j = self.entities.get(entity, {}).get("joins")
-        if not isinstance(j, dict):
-            return {}
-        return {t: c for t, c in j.items() if t in self.entities and self._join_ok(t, c)}
+        out = {t: c for t, c in j.items() if t in self.entities and self._join_ok(t, c)} \
+            if isinstance(j, dict) else {}
+        for child in getattr(self, "per_children", {}).get(entity, []):  # implied by `per`
+            keys = self.key_columns(entity)
+            out.setdefault(child, keys if len(keys) > 1 else keys[0])
+        return out
 
     def key_columns(self, entity: str) -> list[str]:
-        key = self.entities[entity].get("key")
+        e = self.entities[entity]
+        if e.get("writable") is True and isinstance(e.get("per"), str) and e["per"] in self.entities \
+                and e["per"] != entity:
+            return self.key_columns(e["per"])
+        key = e.get("key")
         return [str(k) for k in key] if isinstance(key, list) else [str(key)]
 
     def _join_ok(self, target: str, fk) -> bool:
@@ -303,6 +357,7 @@ class ModelIndex:
         self._check_paths(report)
         self._check_currency(report)
         self._check_lookups_rollups_dates(report)
+        self._check_writable(report)
         for h, levels in self.hierarchies.items():
             for i, level in enumerate(levels):
                 try:
@@ -438,6 +493,108 @@ class ModelIndex:
                         report(path, f"entity `{en}`",
                                f"join to `{target}` uses `{text}`: a join reads columns of the entity's "
                                f"own table only")
+
+    def _check_writable(self, report: Report):
+        from .expr import ExprError, parse_template  # the ${...} language, for defaults and `by`
+
+        def user_only(text, path, label, what):
+            if not isinstance(text, str) or "${" not in text:
+                return
+            try:
+                parts = parse_template(text)
+            except ExprError as e:
+                report(path, label, f"{what}: invalid expression: {e}")
+                return
+            for part in parts:
+                if isinstance(part, tuple):
+                    for node in _walk(part):
+                        if node[0] == "name" and node[1] != "user":
+                            report(path, label, f"{what} may only use `user` (it applies on every write "
+                                                f"path, where there are no dashboard filters); found `{node[1]}`")
+                            return
+
+        for en, e in self.entities.items():
+            label = f"entity `{en}`"
+            path = ("entities", en)
+            writable = e.get("writable") is True
+            cols = e.get("columns") if isinstance(e.get("columns"), dict) else None
+            if not writable:
+                for prop in ("columns", "per", "workflow"):
+                    if prop in e:
+                        report(path + (prop,), label, f"`{prop}` is for writable entities; add `writable: true`")
+                if "key" not in e:
+                    report(path, label, "missing required property `key`")
+                continue
+            if not cols:
+                report(path, label, "a writable entity needs `columns`: the typed columns forms write")
+                cols = {}
+            parent = e.get("per")
+            if parent is not None:
+                if parent not in self.entities:
+                    report(path + ("per",), label, f"`per`: unknown entity `{parent}`" + did_you_mean(str(parent), self.entities))
+                if "key" in e:
+                    report(path + ("key",), label, f"`per: {parent}` sets the key (the key of `{parent}`); "
+                                                   f"remove `key`")
+            elif "key" not in e:
+                report(path, label, "missing required property `key` (or `per: <entity>` for one row per "
+                                    "row of another entity)")
+            else:
+                for k in self.key_columns(en):
+                    if k not in cols:
+                        report(path + ("key",), label, f"key column `{k}` is not one of the entity's `columns`")
+            own = set(self.table_columns(en))
+            for name, spec in cols.items():
+                if not isinstance(spec, dict):
+                    continue
+                cpath, clabel = path + ("columns", name), f"column `{name}`"
+                if isinstance(spec.get("check"), str):
+                    try:
+                        refs = [r for r, _ in references(parse_colexpr(spec["check"]))]
+                    except ColExprError as err:
+                        report(cpath + ("check",), clabel, f"`check`: {err.message}")
+                        refs = []
+                    for r in refs:
+                        if r not in own:
+                            report(cpath + ("check",), clabel, f"`check` uses `{r}`, which is not a column of "
+                                                               f"`{en}`" + did_you_mean(r, own))
+                user_only(spec.get("default"), cpath + ("default",), clabel, "`default`")
+                if isinstance(spec.get("references"), str):
+                    try:
+                        d = self.resolve(spec["references"], ("dimension",)).field
+                    except RefError as err:
+                        report(cpath + ("references",), clabel, f"`references`: {err.message}")
+                        continue
+                    joins = e.get("joins") if isinstance(e.get("joins"), dict) else {}
+                    if joins.get(d.entity) != name:
+                        report(cpath + ("references",), clabel,
+                               f"`references: {d.name}` needs entity `{en}` to join `{d.entity}` on `{name}`; "
+                               f"add `joins: {{ {d.entity}: {name} }}`")
+            dims = e.get("dimensions") if isinstance(e.get("dimensions"), dict) else {}
+            for dname, dspec in dims.items():
+                if dname in cols and not (isinstance(dspec, dict) and dspec.get("column") not in (None, dname)):
+                    report(path + ("dimensions", dname), f"dimension `{dname}`",
+                           f"`{dname}` is a column of writable entity `{en}` and already a dimension; remove it "
+                           f"from `dimensions` (put a label on the column instead)")
+            wf = e.get("workflow")
+            if isinstance(wf, dict):
+                col = wf.get("column")
+                choices = (cols.get(col) or {}).get("choices") if isinstance(cols.get(col), dict) else None
+                if col not in cols:
+                    report(path + ("workflow", "column"), label, f"`workflow.column`: `{col}` is not one of the "
+                                                                 f"entity's `columns`" + did_you_mean(str(col), cols))
+                elif not choices:
+                    report(path + ("workflow", "column"), label, f"`workflow.column`: column `{col}` needs "
+                                                                 f"`choices` (the states)")
+                for tname, tr in (wf.get("transitions") or {}).items():
+                    if not isinstance(tr, dict):
+                        continue
+                    tpath, tlabel = path + ("workflow", "transitions", tname), f"transition `{tname}`"
+                    states = tr.get("from") if isinstance(tr.get("from"), list) else [tr.get("from")]
+                    for s in states + [tr.get("to")]:
+                        if choices and s not in choices:
+                            report(tpath, tlabel, f"`{s}` is not a state of `{col}`; use one of "
+                                                  f"{', '.join(map(str, choices))}" + did_you_mean(str(s), map(str, choices)))
+                    user_only(tr.get("by"), tpath + ("by",), tlabel, "`by`")
 
     def _check_lookups_rollups_dates(self, report: Report):
         for f in self.fields():
@@ -660,6 +817,14 @@ class ModelIndex:
             table = e.get("table")
             if not isinstance(table, str):
                 continue
+            if self.is_writable(en):  # the platform owns this table: its columns are declared
+                own = self.table_columns(en)
+                for f in self.fields(en):
+                    col = f.spec.get("column", f.name)
+                    if f.kind == "dimension" and col not in own:
+                        report(("entities", en, "dimensions", f.name), f"dimension `{f.name}`",
+                               f"column `{col}` is not a column of writable entity `{en}`" + did_you_mean(col, own))
+                continue
             if table not in catalog:
                 report(("entities", en, "table"), f"entity `{en}`",
                        f"table `{table}` not found in connection `{connection}`"
@@ -803,3 +968,14 @@ def _intersect(a: Grain, b: Grain) -> Grain:
         if k in b:
             out[k] = tg if _GRAIN_RANK[tg] >= _GRAIN_RANK[b[k]] else b[k]
     return out
+
+
+def _walk(node):
+    yield node
+    for child in node[1:]:
+        if isinstance(child, tuple):
+            yield from _walk(child)
+        elif isinstance(child, list):
+            for c in child:
+                if isinstance(c, tuple):
+                    yield from _walk(c)

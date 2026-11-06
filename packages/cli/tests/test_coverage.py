@@ -5,23 +5,28 @@ A schema property must be one of:
 - documentation-only: listed in `DOCUMENTATION_ONLY` (no runtime behaviour by design);
 - marked `x-unsupported`: the validator then reports "not supported yet".
 Nothing the validator accepts may be silently ignored.
+
+A property marked `x-write-rule` restricts writes. The server enforces it, and a test in
+`test_write_rules.py` posts around the page and is refused (`@refuses("<kind>:<def>.<prop>")`).
 """
 
 import re
 from datetime import date
 from importlib.resources import files
+import os
 from pathlib import Path
 
 import pytest
 
+from obi_cli.forms import FORMS_RENDERED
 from obi_cli.render import RENDERED, render_dashboard
 from obi_engine import DOCUMENTATION_ONLY, HANDLED_MODEL, HANDLED_PROJECT
 from obi_formats.schema import get_schema
 from obi_formats.validate import validate_project
 
-DEMO = Path(__file__).resolve().parents[3] / "examples" / "sales-demo"
+DEMO = Path(os.environ["OBI_EXAMPLES"]) / "sales-demo"
 AS_OF = date(2026, 11, 5)
-REGISTRY = {"dashboard": RENDERED, "model": HANDLED_MODEL, "project": HANDLED_PROJECT}
+REGISTRY = {"dashboard": RENDERED, "model": HANDLED_MODEL, "project": HANDLED_PROJECT, "form": FORMS_RENDERED}
 
 
 def schema_properties(kind: str):
@@ -77,12 +82,18 @@ def test_rendered_properties_are_read_by_the_renderer():
 
 
 def test_unsupported_property_is_a_validator_error():
-    text = (DEMO / "project.yaml").read_text(encoding="utf-8")
-    broken = text.replace("    duckdb:\n", "    duckdb: { database: sales.duckdb }\n")
-    assert broken != text
-    msgs = [i.text for i in validate_project(DEMO, {"project.yaml": broken}) if i.severity != "info"]
-    assert msgs == ["project `sales-demo`, connection `local`: `duckdb.database` is not supported yet: "
-                    "Phase 0 runs DuckDB in memory; list the files under `tables` instead"]
+    """No live property is marked `x-unsupported` today; mark one for the test and check the
+    message the validator would give."""
+    from obi_formats.schema import get_schema
+
+    schema = get_schema("project")
+    prop = schema.defs["connection"]["properties"]["duckdb"]["properties"]["database"]
+    prop["x-unsupported"] = "test reason"
+    try:
+        msgs = [i.text for i in validate_project(DEMO) if i.severity != "info"]
+    finally:
+        del prop["x-unsupported"]
+    assert msgs == ["project `sales-demo`, connection `local`: `duckdb.database` is not supported yet: test reason"]
 
 
 def test_kpi_on_click_navigates_with_row_values():
@@ -177,3 +188,19 @@ def test_every_schema_property_is_documented(kind, owner, prop, sub):
 def test_documentation_check_is_not_trivially_true():
     assert not _documented("no_such_property_xyz", "`no_such_property_x` and other: text")
     assert _documented("convert", "measure `convert: USD`") and _documented("rate", "  rate: UKURS")
+
+
+def test_every_write_rule_has_a_refusal_test():
+    """CLAUDE.md: every write restriction holds on the server, proved by a request that bypasses
+    the page and is refused."""
+    import ast
+
+    rules = {f"{kind}:{owner}.{prop}" for kind in REGISTRY for owner, prop, sub in schema_properties(kind)
+             if sub.get("x-write-rule")}
+    assert len(rules) >= 15, rules
+    tree = ast.parse((Path(__file__).parent / "test_write_rules.py").read_text(encoding="utf-8"))
+    proved = {arg.value for fn in ast.walk(tree) if isinstance(fn, ast.FunctionDef) and fn.name.startswith("test_")
+              for d in fn.decorator_list if isinstance(d, ast.Call) and getattr(d.func, "id", "") == "refuses"
+              for arg in d.args if isinstance(arg, ast.Constant)}
+    assert sorted(rules - proved) == [], "write rules without a test that posts around the page and is refused"
+    assert sorted(proved - rules) == [], "@refuses names a property that is not marked x-write-rule"

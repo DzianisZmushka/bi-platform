@@ -6,7 +6,7 @@ currency: USD
 
 connections:
   local:
-    duckdb:
+    duckdb: { database: .obi/erp-sales.duckdb }
     tables:
       vbak: data/vbak.csv
       vbap: data/vbap.csv
@@ -19,3 +19,4 @@ connections:
       t179t: data/t179t.csv
       tcurr: data/tcurr.csv
       calendar: data/calendar.csv
+    seeds: { shipment_plans: data/shipment_plans.csv }

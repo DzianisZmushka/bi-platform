@@ -85,3 +85,24 @@ a.kpi-link:hover .kpi-title { color: var(--accent); text-decoration: underline; 
 .crumbs a { color: var(--accent); text-decoration: none; }
 .provenance { margin-top: 6px; }
 .provenance b { color: var(--err-ink); }
+.obi-form { display: flex; flex-direction: column; gap: 10px; max-width: 560px; }
+.obi-form .field { display: flex; flex-direction: column; gap: 4px; }
+.obi-form .field > span:first-child { font-weight: 600; font-size: 13px; }
+.obi-form input, .obi-form select, .obi-form textarea, table.sheet input, table.sheet select {
+  font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+.obi-form .help { color: var(--muted); font-size: 12px; }
+.form-buttons { display: flex; gap: 8px; }
+.form-buttons button, .row-form button, .new-row button, .sheet-bulk button {
+  background: var(--accent); color: #fff; border: 0; border-radius: 6px; padding: 6px 12px; font: inherit; cursor: pointer; }
+button.secondary { background: #e5e7eb; color: var(--ink); }
+.form-error { color: var(--err-ink); font-size: 12px; display: block; }
+.form-ok { color: #1a7f37; font-weight: 600; }
+.form-mode { color: var(--muted); font-size: 12px; }
+table.sheet td { padding: 4px 6px; }
+table.sheet input { width: 100%; min-width: 90px; }
+.row-actions { white-space: nowrap; }
+.row-form { display: inline-flex; gap: 4px; }
+.history-link { font-size: 12px; margin-left: 6px; }
+.sheet-bulk { margin-top: 10px; }
+.sheet-history { margin-top: 10px; }
+.markdown.empty { color: var(--muted); }

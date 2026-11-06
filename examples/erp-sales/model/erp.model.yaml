@@ -43,6 +43,11 @@ entities:
         where: rejection_reason is null
         convert: USD
         format: currency
+      delivered_value_usd:
+        sum: delivered_quantity * NETWR / KWMENG
+        label: Delivered value USD
+        convert: USD
+        format: currency
       return_value_usd: { sum: NETWR, where: order_type = 'ZRE', convert: USD, format: currency }
       order_count: { count_distinct: VBELN, format: integer }
       item_count: { count: POSNR, format: integer }
@@ -70,6 +75,52 @@ entities:
     measures:
       delivered_quantity_total: { sum: LFIMG, label: Delivered quantity, format: integer }
       delivery_count: { count_distinct: VBELN, format: integer }
+
+  order_notes:
+    description: One note per order item, written from the open-orders table, with a review status.
+    table: order_notes
+    writable: true
+    per: order_items
+    columns:
+      note: { type: text, required: true, check: length(note) <= 1000 }
+      next_step:
+        type: string
+        choices: [call customer, check stock, wait for payment, cancel item]
+      status:
+        type: string
+        required: true
+        default: draft
+        choices: [draft, submitted, approved]
+    workflow:
+      column: status
+      transitions:
+        submit: { from: draft, to: submitted }
+        approve: { from: submitted, to: approved, by: "${user.role == 'sales_manager'}" }
+        reopen: { from: [submitted, approved], to: draft, by: "${user.role == 'sales_manager'}" }
+    dimensions:
+      note_status: { column: status }
+      note_by: { column: updated_by }
+
+  shipment_plans:
+    description: Planned shipment value per sales organisation and week, kept by sales ops in the shipment-plan sheet.
+    table: shipment_plans
+    key: [VKORG, week_start]
+    writable: true
+    columns:
+      VKORG: { label: Sales org, type: string, required: true, references: sales_org }
+      week_start: { label: Week, type: date, required: true }
+      planned_value_usd:
+        label: Planned shipments USD
+        type: number
+        required: true
+        check: planned_value_usd >= 0
+    joins: { calendar: week_start, sales_orgs: VKORG }
+    measures:
+      planned_shipments_usd: { sum: planned_value_usd, label: Planned shipments, format: currency }
+      shipment_plan_attainment:
+        calc: delivered_value_usd / planned_shipments_usd
+        label: Plan attainment
+        format: percent
 
   billing_items:
     description: Billing items (VBRP), linked to the order item they bill; dated and converted at billing.

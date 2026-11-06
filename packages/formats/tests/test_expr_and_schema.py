@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -9,7 +10,7 @@ from obi_formats.schema import get_schema
 from obi_formats.validate import check_expression
 
 ROOT = Path(__file__).resolve().parents[3]
-DEMO = ROOT / "examples" / "sales-demo"
+DEMO = Path(os.environ["OBI_EXAMPLES"]) / "sales-demo"
 
 
 # --------------------------------------------------------------------------- expressions
@@ -69,7 +70,8 @@ def test_static_checks():
     assert check_expression("${filters.region != null}", **kw) == [
         "`filters.region` is a list and is never null; use `filters.region.count > 0`"]
     assert check_expression("${filters.region.size}", **kw) == [
-        "`filters.region.size` is not available; use `.label`, `.count`, `.first` or `.includes(x)`"]
+        "`filters.region.size` is not available; use `.label`, `.count`, `.first`, `.includes(x)`, or "
+        "`.start`/`.end` for date filters"]
     assert check_expression("${value}", names=("filters", "user"), filter_ids=["region"]) == [
         "`value` is not available here; use filters, user"]
     assert check_expression("${row}", **kw) == ["`row` needs a name after it, such as `row.net_revenue`"]
@@ -102,5 +104,5 @@ def test_published_schema_dispatches_on_kind_key():
     errors = sorted(validator.iter_errors(doc), key=lambda e: list(e.absolute_path))
     paths = [list(e.absolute_path) for e in errors]
     assert ["pages", 0, "items", 0] in paths and ["pages", 0, "items", 1] in paths
-    assert len(get_schema("dashboard").raw["$defs"]["node"]["allOf"]) == 11
+    assert len(get_schema("dashboard").raw["$defs"]["node"]["allOf"]) == 12
     assert not any("oneOf" in str(d) for d in get_schema("dashboard").raw["$defs"].values())

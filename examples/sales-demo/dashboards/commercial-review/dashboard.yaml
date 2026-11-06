@@ -37,6 +37,17 @@ pages:
             target: revenue_target
             sparkline: date.month
             ignore_filters: [channel, segment]
+          - text: revenue_comment
+            title: Comment
+            rows: [comment, commented_by, commented_at]
+            where: { kpi: revenue }
+            ignore_filters: [channel, segment]
+            sort: -commented_at
+            content: |
+              ${row.comment}
+
+              — ${row.commented_by}, ${row.commented_at}
+            empty: No comment yet for this period.
           - kpi: attainment
             measure: target_attainment
             ignore_filters: [channel, segment]
@@ -100,6 +111,11 @@ pages:
                 cells:
                   target_gap: { color: "${value < 0 ? 'danger' : 'ok'}" }
                   target_attainment: { color: "${value < 1 ? 'warning' : 'ok'}" }
+      - section: commentary
+        title: Add a comment
+        collapsed: true
+        items:
+          - form: kpi-comment
       - row: links
         items:
           - button: open_regions
@@ -322,3 +338,19 @@ pages:
       - button: back_to_summary_from_customers
         label: Back to summary
         on_click: { navigate: summary }
+
+  - page: target_entry
+    title: Targets
+    description: Edit monthly targets per region. Attainment updates as soon as a row is saved.
+    items:
+      - grid: targets_layout
+        columns: [3, 2]
+        items:
+          - form: targets
+          - chart: attainment_live
+            title: Attainment by region
+            mark: bar
+            x: region
+            y: target_attainment
+            ignore_filters: [channel, segment]
+            color: "${value < 0.95 ? 'danger' : value < 1 ? 'warning' : 'ok'}"

@@ -1,0 +1,14 @@
+sheet: shipment-plan
+title: Shipment plan
+description: Planned shipment value per sales organisation and week. Paste from a spreadsheet or import a CSV; rows are never deleted.
+entity: shipment_plans
+columns: [VKORG, week_start, planned_value_usd]
+
+filters:
+  - filter: period
+    column: week_start
+    default: fiscal_year_to_date
+  - filter: sales_org
+    column: VKORG
+sort: week_start
+allow: [edit, add, paste, import]

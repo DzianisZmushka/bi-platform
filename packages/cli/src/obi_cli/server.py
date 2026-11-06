@@ -1,7 +1,10 @@
-"""`obi serve`: re-validate and re-render on every request.
+"""`obi serve`: re-validate and re-render on every request; forms write through POST.
 
 Edit the YAML, refresh the browser, and see the change, or see the validation errors
-when it is broken. Local use only: binds to 127.0.0.1.
+when it is broken. A form or sheet posts to `/_write`; the write runs the model's rules
+and the browser is sent back to the page, which then shows the new data. Local use only:
+binds to 127.0.0.1. The user is whoever `--user` / `--user-attr` say (no sign-in before the
+Phase 2 runtime).
 """
 
 from __future__ import annotations
@@ -18,9 +21,12 @@ from urllib.parse import parse_qs, urlparse
 
 from obi_formats.artifacts import parse
 
-from .checks import validate_all as validate_project
+from obi_engine import Project
+from obi_engine.store import auto_migrate
 
-from .render import dashboard_ids, filter_ids, render_dashboard
+from .checks import validate_all as validate_project
+from .forms import load_forms, handle_post, parse_body
+from .render import dashboard_ids, filter_ids, render_dashboard, render_form_page
 
 
 def git_commit(root: Path) -> str | None:
@@ -48,44 +54,79 @@ def provenance(root: Path, started: str, commit: str | None) -> str:
     return f'<div class="provenance">{text}</div>'
 
 
-def serve(root: Path, port: int, as_of: date | None):
+def serve(root: Path, port: int, as_of: date | None, user: dict | None = None):
     started = datetime.now().strftime("%Y-%m-%d %H:%M")
     commit = git_commit(root)
+    user = user or {}
+
+    def footer() -> str:
+        who = f" Signed in as <code>{html.escape(str(user.get('name', 'anonymous')))}</code>" \
+              + (f" ({html.escape(', '.join(f'{k}={v}' for k, v in user.items() if k != 'name'))})"
+                 if len(user) > 1 else "") + "."
+        return provenance(root, started, commit) + f'<div class="provenance">{who}</div>'
+
+    def dashboard_page(path_qs: str, form_state: dict | None = None) -> tuple[int, str]:
+        url = urlparse(path_qs)
+        parts = url.path.strip("/").split("/")
+        issues = [i for i in validate_project(root, execute=True) if i.severity == "error"]
+        if issues:
+            return 400, _page("Validation failed", footer=footer(), body=
+                              "<ul>" + "".join(f"<li><code>{html.escape(str(i))}</code></li>" for i in issues) + "</ul>")
+        qs = parse_qs(url.query, keep_blank_values=True)
+        if parts[0] == "forms" and len(parts) == 2:  # a form or sheet on its own page
+            return 200, render_form_page(root, parts[1], user, path_qs, form_state, qs, footer(), as_of)
+        did = parts[0]
+        known = dashboard_ids(root)
+        if not did:
+            links = "".join(f'<li><a href="/{d}">{html.escape(t)}</a> <code>{d}</code></li>' for d, t in known)
+            forms = "".join(f'<li><a href="/forms/{f}">{html.escape(d.get("title") or f)}</a> <code>{f}</code></li>'
+                            for f, d in load_forms(root).items())
+            proj = parse((root / "project.yaml").read_text(encoding="utf-8")).data
+            desc = f"<p>{html.escape(proj.get('description') or '')}</p>"
+            body = f"{desc}<h2>Dashboards</h2><ul>{links}</ul>" + (f"<h2>Forms</h2><ul>{forms}</ul>" if forms else "")
+            return 200, _page(proj.get("title") or f"Project {root.name}", body, footer())
+        if did not in {d for d, _ in known}:
+            return 404, _page("Not found", f"No dashboard <code>{html.escape(did)}</code>.")
+        fids = filter_ids(root, did)
+        if "_set" in qs:
+            # Complete filter state (form submit, in-dashboard link): a filter that is missing
+            # was cleared, not reset to its default.
+            inputs = {fid: qs.get(fid, []) for fid in fids}
+        else:
+            # Partial (link from another dashboard): given filters on top of defaults.
+            inputs = {fid: qs[fid] for fid in fids if fid in qs} or None
+        drill = {k[len("drill."):]: v for k, v in qs.items() if k.startswith("drill.")}
+        result = render_dashboard(root, did, inputs, as_of, mode="serve", drill=drill, footer=footer(),
+                                  user=user, here=path_qs, form_state=form_state, query=qs)
+        return 200, result.html
+
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
-            url = urlparse(self.path)
-            did = url.path.strip("/")
             try:
-                issues = [i for i in validate_project(root, execute=True) if i.severity == "error"]
-                if issues:
-                    return self._send(400, _page("Validation failed", footer=provenance(root, started, commit), body=
-                                      "<ul>" + "".join(f"<li><code>{html.escape(str(i))}</code></li>"
-                                                       for i in issues) + "</ul>"))
-                known = dashboard_ids(root)
-                if not did:
-                    links = "".join(f'<li><a href="/{d}">{html.escape(t)}</a> <code>{d}</code></li>'
-                                    for d, t in known)
-                    proj = parse((root / "project.yaml").read_text(encoding="utf-8")).data
-                    desc = f"<p>{html.escape(proj.get('description') or '')}</p>"
-                    return self._send(200, _page(proj.get("title") or f"Project {root.name}",
-                                                 f"{desc}<ul>{links}</ul>", provenance(root, started, commit)))
-                if did not in {d for d, _ in known}:
-                    return self._send(404, _page("Not found", f"No dashboard <code>{html.escape(did)}</code>."))
-                qs = parse_qs(url.query, keep_blank_values=True)
-                fids = filter_ids(root, did)
-                if "_set" in qs:
-                    # Complete filter state (form submit, in-dashboard link): a filter that is
-                    # missing was cleared, not reset to its default.
-                    inputs = {fid: qs.get(fid, []) for fid in fids}
-                else:
-                    # Partial (link from another dashboard): given filters on top of defaults.
-                    inputs = {fid: qs[fid] for fid in fids if fid in qs} or None
-                drill = {k[len("drill."):]: v for k, v in qs.items() if k.startswith("drill.")}
-                result = render_dashboard(root, did, inputs, as_of, mode="serve", drill=drill,
-                                          footer=provenance(root, started, commit))
-                self._send(200, result.html)
+                self._send(*dashboard_page(self.path))
             except Exception:
                 self._send(500, _page("Render failed", f"<pre>{html.escape(traceback.format_exc())}</pre>"))
+
+        def do_POST(self):
+            """Writes from forms and sheets (ADR-012): one write path, then back to the page."""
+            try:
+                if urlparse(self.path).path != "/_write":
+                    return self._send(404, _page("Not found", "Writes go to <code>/_write</code>."))
+                body = parse_body(self.rfile.read(int(self.headers.get("Content-Length") or 0)))
+                project = Project(root)
+                auto_migrate(project)
+                redirect, state = handle_post(project, user, load_forms(root), body)
+                if redirect:
+                    self.send_response(303)
+                    self.send_header("Location", redirect)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                back = (body.get("_return") or ["/"])[0]
+                status, page = dashboard_page(back, state)
+                self._send(422 if status == 200 else status, page)
+            except Exception:
+                self._send(500, _page("Write failed", f"<pre>{html.escape(traceback.format_exc())}</pre>"))
 
         def _send(self, status: int, body: str):
             data = body.encode("utf-8")
