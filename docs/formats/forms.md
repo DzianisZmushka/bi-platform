@@ -51,8 +51,8 @@ workflow:
   column: status          # a column with choices: the states
   transitions:
     submit: { from: draft, to: submitted }
-    approve: { from: submitted, to: approved, by: "${user.role == 'sales_manager'}" }
-    reopen: { from: [submitted, approved], to: draft, by: "${user.role == 'sales_manager'}" }
+    approve: { from: submitted, to: approved, by: "${user.roles.includes('sales_manager')}" }
+    reopen: { from: [submitted, approved], to: draft, by: "${user.roles.includes('sales_manager')}" }
 ```
 
 - The workflow column is never a form field; it changes only through `transitions`.
@@ -152,4 +152,4 @@ The page only reflects the rules; the server enforces them. A request built by h
 - `project.yaml` names a DuckDB file: `duckdb: { database: .obi/<project>.duckdb }`. It is never in Git, because `.obi/` is ignored.
 - `seeds: { <table>: <csv> }` gives initial rows, loaded once when the table is created; `obi migrate --reseed <table>` loads them again, moving current rows to history.
 - `obi serve` and `obi validate --execute` migrate automatically when the database is missing or behind the model. `obi migrate` runs it explicitly.
-- `obi serve --user <name> --user-attr role=<role>` sets `user.*` until the Phase 2 runtime has sign-in.
+- `obi serve --user <name> --role <role> --attr <name>=<value>` sets `user.*` until sign-in arrives (Phase 2b).

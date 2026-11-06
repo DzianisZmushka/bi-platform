@@ -95,8 +95,11 @@ entities:
       column: status
       transitions:
         submit: { from: draft, to: submitted }
-        approve: { from: submitted, to: approved, by: "${user.role == 'sales_manager'}" }
-        reopen: { from: [submitted, approved], to: draft, by: "${user.role == 'sales_manager'}" }
+        approve: { from: submitted, to: approved, by: "${user.roles.includes('sales_manager')}" }
+        reopen:
+          from: [submitted, approved]
+          to: draft
+          by: "${user.roles.includes('sales_manager')}"
     dimensions:
       note_status: { column: status }
       note_by: { column: updated_by }
@@ -155,9 +158,11 @@ entities:
   sales_orgs:
     table: tvko
     key: VKORG
+    access: { where: sales_org_code in user.sales_orgs }
     joins: { company_codes: BUKRS }
     dimensions:
       sales_org: { column: VTEXT }
+      sales_org_code: { column: VKORG }
 
   company_codes:
     table: t001

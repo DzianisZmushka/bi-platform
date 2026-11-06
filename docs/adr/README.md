@@ -16,3 +16,4 @@ Short records: context, decision, consequences. A record is never edited after a
 | [010](010-snapshot-measures.md) | Snapshot measures (state at a date) | Proposed, Phase 2 (runtime) |
 | [011](011-forms-before-runtime.md) | Forms before the runtime (Phase 1 = forms) | Accepted |
 | [012](012-forms-and-writable-entities.md) | Forms and writable entities | Accepted |
+| [013](013-roles-before-deploy.md) | Roles and row-level security before deploy (Phase 2a / 2b) | Accepted |

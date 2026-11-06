@@ -15,10 +15,12 @@ from obi_cli.render import render_dashboard
 from obi_engine import Project, SemanticQuery
 from obi_engine.store import Writer, migrate
 
+# Every region and sales org: these tests are about the write rules, not about access (test_access_*.py).
+ALL_ROWS = {"regions": ["emea", "na", "apac", "latam"], "sales_orgs": ["DE01", "PL01", "AE01", "US01", "US02"]}
 EXAMPLES = Path(os.environ["OBI_EXAMPLES"])
 AS_OF = date(2026, 11, 5)
-BOB = {"name": "bob", "role": "sales"}
-MIA = {"name": "mia", "role": "sales_manager"}
+BOB = {"name": "bob", "roles": ["sales_rep"], **ALL_ROWS}
+MIA = {"name": "mia", "roles": ["sales_manager"], **ALL_ROWS}
 
 
 def fresh(tmp_path, name) -> Path:
@@ -68,7 +70,7 @@ def test_submit_and_approve_through_the_form(erp):
     assert post(root, BOB, _form="order-note", _action="transition:submit", **key, note="Check stock")[1] is None
     _, state = post(root, BOB, _form="order-note", _action="transition:approve", **key, note="Check stock")
     assert state["order-note"]["errors"] == {
-        "status": ["`approve` is not allowed for bob (`${user.role == 'sales_manager'}`)"]}
+        "status": ["`approve` is not allowed for bob (`${user.roles.includes('sales_manager')}`)"]}
     html = note_page(root, inputs, MIA)
     assert 'value="transition:approve"' in html and 'value="transition:reopen"' in html
     post(root, MIA, _form="order-note", _action="transition:approve", **key, note="Check stock")
@@ -91,7 +93,7 @@ def test_comment_appears_next_to_the_kpi(tmp_path):
     root = fresh(tmp_path, "sales-demo")
     html = render_dashboard(root, "commercial-review", None, AS_OF, mode="serve").html
     assert "No comment yet for this period." in html
-    _, state = post(root, {"name": "alice"}, _form="kpi-comment", _action="save", kpi="revenue", region_id="EMEA",
+    _, state = post(root, {"name": "alice", "roles": ["sales_rep"], **ALL_ROWS}, _form="kpi-comment", _action="save", kpi="revenue", region_id="EMEA",
                     month="2026-01-01", comment="Strong January in EMEA")
     assert state is None
     html = render_dashboard(root, "commercial-review", {"period": ["2026-01-01..2026-12-31"]}, AS_OF,
@@ -101,13 +103,13 @@ def test_comment_appears_next_to_the_kpi(tmp_path):
 
 def test_sheet_paste_saves_nothing_when_one_row_fails(tmp_path):
     root = fresh(tmp_path, "sales-demo")
-    w = Writer(Project(root), BOB)
+    w = Writer(Project(root), MIA)
     before = len(w.rows("targets"))
-    _, state = post(root, BOB, _form="targets", _action="sheet_paste",
+    _, state = post(root, MIA, _form="targets", _action="sheet_paste",
                     _rows="2027-01-01\temea\t100\n2027-01-15\tapac\t200\n")
     assert state["targets"]["errors"] == ["row 2: month: fails the rule `day(month) = 1`"]
     assert len(w.rows("targets")) == before
-    _, state = post(root, BOB, _form="targets", _action="sheet_paste",
+    _, state = post(root, MIA, _form="targets", _action="sheet_paste",
                     _rows="2027-01-01\tEMEA\t100\n2027-02-01\tapac\t200\n")
     assert state is None and len(w.rows("targets")) == before + 2
     assert w.get("targets", {"month": date(2027, 1, 1), "region_id": "emea"})["revenue_target"] == 100
@@ -115,10 +117,10 @@ def test_sheet_paste_saves_nothing_when_one_row_fails(tmp_path):
 
 def test_sheet_import_csv_by_header(tmp_path):
     root = fresh(tmp_path, "sales-demo")
-    _, state = post(root, BOB, _form="targets", _action="sheet_import",
+    _, state = post(root, MIA, _form="targets", _action="sheet_import",
                     _rows="region_id,month,revenue_target\napac,2027-03-01,5\n")
     assert state is None
-    assert Writer(Project(root), BOB).get("targets", {"month": date(2027, 3, 1), "region_id": "apac"})
+    assert Writer(Project(root), MIA).get("targets", {"month": date(2027, 3, 1), "region_id": "apac"})
 
 
 def sheet_weeks(root, query) -> tuple[list[str], list[str]]:

@@ -3,7 +3,7 @@
 Edit the YAML, refresh the browser, and see the change, or see the validation errors
 when it is broken. A form or sheet posts to `/_write`; the write runs the model's rules
 and the browser is sent back to the page, which then shows the new data. Local use only:
-binds to 127.0.0.1. The user is whoever `--user` / `--user-attr` say (no sign-in before the
+binds to 127.0.0.1. The user is whoever `--user` / `--role` / `--attr` say (no sign-in before the
 Phase 2 runtime).
 """
 
@@ -21,7 +21,7 @@ from urllib.parse import parse_qs, urlparse
 
 from obi_formats.artifacts import parse
 
-from obi_engine import Project
+from obi_engine import Grants, Project
 from obi_engine.store import auto_migrate
 
 from .checks import validate_all as validate_project
@@ -54,21 +54,36 @@ def provenance(root: Path, started: str, commit: str | None) -> str:
     return f'<div class="provenance">{text}</div>'
 
 
+def pending_banner(pending: list[str]) -> str:
+    """Shown on every page while a property marked `x-pending` is in use: accepted by the
+    validator, not enforced yet (ADR-013). Never silent."""
+    if not pending:
+        return ""
+    return ('<div class="pending-banner"><b>Access rules declared but not enforced.</b> '
+            + html.escape(" ".join(pending)) + "</div>")
+
+
 def serve(root: Path, port: int, as_of: date | None, user: dict | None = None):
     started = datetime.now().strftime("%Y-%m-%d %H:%M")
     commit = git_commit(root)
     user = user or {}
 
+    pending: list[str] = []  # "not enforced yet" warnings of the last validation (x-pending)
+
     def footer() -> str:
+        def show(v):
+            return ",".join(map(str, v)) if isinstance(v, list) else str(v)
+        extra = {k: v for k, v in user.items() if k != "name" and v not in ([], None, "")}
         who = f" Signed in as <code>{html.escape(str(user.get('name', 'anonymous')))}</code>" \
-              + (f" ({html.escape(', '.join(f'{k}={v}' for k, v in user.items() if k != 'name'))})"
-                 if len(user) > 1 else "") + "."
-        return provenance(root, started, commit) + f'<div class="provenance">{who}</div>'
+              + (f" ({html.escape('; '.join(f'{k}={show(v)}' for k, v in extra.items()))})" if extra else "") + "."
+        return pending_banner(pending) + provenance(root, started, commit) + f'<div class="provenance">{who}</div>'
 
     def dashboard_page(path_qs: str, form_state: dict | None = None) -> tuple[int, str]:
         url = urlparse(path_qs)
         parts = url.path.strip("/").split("/")
-        issues = [i for i in validate_project(root, execute=True) if i.severity == "error"]
+        checked = validate_project(root, execute=True)
+        pending[:] = [i.text for i in checked if i.severity == "warning" and "is not enforced yet" in i.text]
+        issues = [i for i in checked if i.severity == "error"]
         if issues:
             return 400, _page("Validation failed", footer=footer(), body=
                               "<ul>" + "".join(f"<li><code>{html.escape(str(i))}</code></li>" for i in issues) + "</ul>")
@@ -77,16 +92,21 @@ def serve(root: Path, port: int, as_of: date | None, user: dict | None = None):
             return 200, render_form_page(root, parts[1], user, path_qs, form_state, qs, footer(), as_of)
         did = parts[0]
         known = dashboard_ids(root)
+        grants = Grants.load(root, user)  # the server decides what is listed and opened
         if not did:
-            links = "".join(f'<li><a href="/{d}">{html.escape(t)}</a> <code>{d}</code></li>' for d, t in known)
+            links = "".join(f'<li><a href="/{d}">{html.escape(t)}</a> <code>{d}</code></li>' for d, t in known
+                            if grants.can_view_dashboard(d))
             forms = "".join(f'<li><a href="/forms/{f}">{html.escape(d.get("title") or f)}</a> <code>{f}</code></li>'
-                            for f, d in load_forms(root).items())
+                            for f, d in load_forms(root).items() if grants.can_view_form(f))
             proj = parse((root / "project.yaml").read_text(encoding="utf-8")).data
             desc = f"<p>{html.escape(proj.get('description') or '')}</p>"
             body = f"{desc}<h2>Dashboards</h2><ul>{links}</ul>" + (f"<h2>Forms</h2><ul>{forms}</ul>" if forms else "")
             return 200, _page(proj.get("title") or f"Project {root.name}", body, footer())
         if did not in {d for d, _ in known}:
             return 404, _page("Not found", f"No dashboard <code>{html.escape(did)}</code>.")
+        if not grants.can_view_dashboard(did):
+            return 403, _page("No access", f"No access to dashboard <code>{html.escape(did)}</code>: access.yaml "
+                                           f"gives <code>view</code> on it to none of your roles.", footer())
         fids = filter_ids(root, did)
         if "_set" in qs:
             # Complete filter state (form submit, in-dashboard link): a filter that is missing

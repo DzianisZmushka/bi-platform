@@ -73,6 +73,11 @@
           "description": "Required, except on a writable entity with `per:` (the key comes from that entity).",
           "x-write-rule": true
         },
+        "access": {
+          "$ref": "#/$defs/row_access",
+          "description": "Row-level security: which rows of this entity, and of every entity that joins it, a user may read and write.",
+          "x-write-rule": true
+        },
         "grain": {
           "$ref": "#/$defs/refs",
           "description": "Dimensions this entity's measures can be sliced and filtered by. Default: every dimension reachable through joins, at full detail."
@@ -550,6 +555,21 @@
       "required": [
         "from",
         "to"
+      ],
+      "additionalProperties": false
+    },
+    "row_access": {
+      "type": "object",
+      "properties": {
+        "where": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A condition over model dimensions and `user.*` attributes (listed in access.yaml), e.g. `sales_org_code in user.sales_orgs`. It applies to every query through this entity, to rows of entities that join it, and to writes. A missing attribute means no rows.",
+          "x-write-rule": true
+        }
+      },
+      "required": [
+        "where"
       ],
       "additionalProperties": false
     }

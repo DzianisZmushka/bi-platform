@@ -16,6 +16,12 @@ OVERVIEW = "dashboards/revenue-overview/dashboard.yaml"
 REVIEW = "dashboards/commercial-review/dashboard.yaml"
 
 
+def shown(issue) -> bool:
+    """Errors and warnings, without info notices and without the "not enforced yet" warnings of
+    pending properties (ADR-013), which test_access.py checks on their own."""
+    return issue.severity != "info" and "is not enforced yet" not in issue.text
+
+
 def edit(rel: str, old: str, new: str) -> dict[str, str]:
     text = (DEMO / rel).read_text(encoding="utf-8")
     assert text.count(old) == 1, f"edit anchor must be unique in {rel}: {old!r}"
@@ -25,11 +31,11 @@ def edit(rel: str, old: str, new: str) -> dict[str, str]:
 def messages(overrides: dict[str, str], file: str | None = None) -> list[str]:
     issues = validate_project(DEMO, overrides)
     # Info lines (route notices) are tested separately; these lists hold errors and warnings.
-    return [i.text for i in issues if (file is None or i.file == file) and i.severity != "info"]
+    return [i.text for i in issues if (file is None or i.file == file) and shown(i)]
 
 
 def lines(overrides: dict[str, str]) -> list[int]:
-    return [i.line for i in validate_project(DEMO, overrides) if i.severity != "info"]
+    return [i.line for i in validate_project(DEMO, overrides) if shown(i)]
 
 
 def test_example_project_is_valid():
@@ -327,11 +333,11 @@ O2C = "dashboards/order-to-cash/dashboard.yaml"
 def erp_messages(rel: str, old: str, new: str) -> list[str]:
     text = (ERP / rel).read_text(encoding="utf-8")
     assert text.count(old) == 1, old
-    return [i.text for i in validate_project(ERP, {rel: text.replace(old, new)}) if i.severity != "info"]
+    return [i.text for i in validate_project(ERP, {rel: text.replace(old, new)}) if shown(i)]
 
 
 def test_erp_example_is_valid():
-    assert [i.text for i in validate_project(ERP) if i.severity != "info"] == []
+    assert [i.text for i in validate_project(ERP) if shown(i)] == []
 
 
 def test_document_currency_cannot_be_added_across_currencies():
@@ -435,7 +441,7 @@ def project_messages(project: str, rel: str, old: str, new: str) -> list[str]:
     root = DEMO.parent / project
     text = (root / rel).read_text(encoding="utf-8")
     assert text.count(old) == 1, f"edit anchor must be unique in {rel}: {old!r}"
-    return [i.text for i in validate_project(root, {rel: text.replace(old, new)}) if i.severity != "info"]
+    return [i.text for i in validate_project(root, {rel: text.replace(old, new)}) if shown(i)]
 
 
 KPI_COMMENT = "forms/kpi-comment.form.yaml"
@@ -477,8 +483,11 @@ def test_writable_entity_model_errors():
                             "      note_status: { column: status }\n      note: { column: note }") == [
         "model `erp`, dimension `note`: `note` is a column of writable entity `order_notes` and already a "
         "dimension; remove it from `dimensions` (put a label on the column instead)"]
-    assert project_messages("sales-demo", MODEL, "      region_id: { label: Region, type: string, references: region }",
-                            "      region_id: { label: Region, type: string, references: regoin }") == [
+    assert project_messages("sales-demo", MODEL,
+                            "      region_id: { label: Region, type: string, required: true, references: region }\n"
+                            "      month: { type: date, required: true }\n",
+                            "      region_id: { label: Region, type: string, required: true, references: regoin }\n"
+                            "      month: { type: date, required: true }\n") == [
         "model `sales`, column `region_id`: `references`: dimension `regoin` not found in model `sales`; "
         "did you mean `region`?"]
 
@@ -520,7 +529,7 @@ def test_duplicate_key_is_one_error_and_the_model_still_loads():
     vkorg_line = next(n for n, l in enumerate(lines, 1) if l.startswith("      VKORG: {"))
     for name, first in (("VKORG", vkorg_line), ("week_start", week_line)):
         broken = text.replace(anchor, f"{anchor}\n      {name}: {{ type: string }}", 1)
-        issues = [i for i in validate_project(root, {rel: broken}) if i.severity != "info"]
+        issues = [i for i in validate_project(root, {rel: broken}) if shown(i)]
         assert [(i.file, i.line, i.text) for i in issues] == [
             (rel, week_line + 1,
              f"model `erp`, entity `shipment_plans`: `{name}` appears twice in `columns` (first on line {first}); "

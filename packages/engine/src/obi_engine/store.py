@@ -15,11 +15,15 @@ from obi_formats.colexpr import parse as parse_colexpr
 from obi_formats.expr import ExprError, render as render_expr
 from obi_formats.modelindex import AUDIT_COLUMNS, ModelIndex, RefError
 
-from .engine import STORE, Project, _qualify, _q, _lit
+from .access import Grants
+from .engine import STORE, Engine, Project, _qualify, _q, _lit
 
 SQL_TYPES = {"id": "BIGINT", "string": "VARCHAR", "text": "VARCHAR", "number": "DOUBLE", "integer": "BIGINT",
              "date": "DATE", "timestamp": "TIMESTAMP", "boolean": "BOOLEAN"}
 HISTORY_COLUMNS = {"history_op": "VARCHAR", "history_at": "TIMESTAMP", "history_by": "VARCHAR"}
+
+
+NOT_FOUND = "the row does not exist; reload the page"
 
 
 class WriteError(Exception):
@@ -178,12 +182,26 @@ def _to_history(project: Project, w: Writable, where: str, op: str, by: str):
 
 @dataclass
 class Writer:
+    """Writes as `user`, inside what access.yaml allows (ADR-013): only entities the user may
+    write, only columns they may write, and only rows they may see, before and after the write.
+    Without a user it writes as the system (`obi migrate`, tests of the write rules)."""
     project: Project
-    user: dict = field(default_factory=dict)
+    user: dict | None = None
+
+    def __post_init__(self):
+        self.grants = Grants.load(self.project.root, self.user) if self.user is not None else Grants.system()
+        self._engines: dict[str, Engine] = {}
 
     @property
     def who(self) -> str:
-        return str(self.user.get("name") or "anonymous")
+        return str((self.user or {}).get("name") or ("system" if self.user is None else "anonymous"))
+
+    def engine(self, model: str) -> Engine:
+        """The model's engine, seeing only this user's rows."""
+        if model not in self._engines:
+            base = self.project.engine(model)
+            self._engines[model] = Engine(self.project.con, base.idx, base.store, self.grants)
+        return self._engines[model]
 
     # ---- reading
 
@@ -203,12 +221,14 @@ class Writer:
 
     def history(self, entity: str, key: dict) -> list[dict]:
         w = find(self.project, entity)
+        if self.get(entity, key) is None:  # only the history of rows the user may see
+            return []
         rel = self.project.con.sql(f"SELECT * FROM {_qt(w.table + '_history')} WHERE {self._key_where(w, key)} "
                                    f"ORDER BY history_at DESC, rowid DESC")
         return [dict(zip(rel.columns, r)) for r in rel.fetchall()]
 
     def _rows(self, w: Writable, where: str, order: str = "") -> list[dict]:
-        rel = self.project.con.sql(f"SELECT * FROM {_qt(w.table)} WHERE {where}{order}")
+        rel = self.project.con.sql(f"SELECT * FROM {self.engine(w.model).table(w.entity)} AS v WHERE {where}{order}")
         return [dict(zip(rel.columns, r)) for r in rel.fetchall()]
 
     def _key_where(self, w: Writable, key: dict) -> str:
@@ -222,7 +242,7 @@ class Writer:
         ref = w.columns.get(column, {}).get("references")
         if not ref:
             return []
-        eng = self.project.engine(w.model)
+        eng = self.engine(w.model)
         d = eng.idx.resolve(ref, ("dimension",)).field
         key = eng.idx.key_columns(d.entity)[0]
         disp = d.spec.get("column", d.name)
@@ -231,10 +251,12 @@ class Writer:
 
     # ---- writing
 
-    def save(self, entity: str, values: dict, row_key: dict | None = None) -> dict:
+    def save(self, entity: str, values: dict, row_key: dict | None = None, via_form: str | None = None) -> dict:
         """Insert or update one row and return its key. `values` may be strings (from HTML);
-        `row_key` identifies the row being edited when the key columns are not editable."""
+        `row_key` identifies the row being edited when the key columns are not editable;
+        `via_form` is the form or sheet used, whose `edit` grant implies `write` (ADR-013)."""
         w = find(self.project, entity)
+        self._may_write(w, via_form)
         errors: dict[str, list[str]] = {}
         typed = {}
         for c, v in values.items():
@@ -244,10 +266,16 @@ class Writer:
                 typed[c] = self._coerce(v, w.types[c])
             except ValueError:
                 errors.setdefault(c, []).append(f"`{v}` is not a valid {w.types[c]}")
-        current = None
+        current, hidden = None, False
         key_src = row_key or typed
         if all(key_src.get(k) is not None for k in w.key):
-            current = self.get(entity, {k: self._coerce(key_src[k], w.types[k]) for k in w.key})
+            key = {k: self._coerce(key_src[k], w.types[k]) for k in w.key}
+            current = self.get(entity, key)
+            # A row the user cannot see is answered like a row that does not exist (ADR-013):
+            # never "outside your rows", which would confirm that it exists.
+            hidden = current is None and self._exists_hidden(w, key)
+            if hidden and row_key:
+                raise WriteError({"": [NOT_FOUND]})
         row = dict(current or {})
         status = (w.workflow or {}).get("column")
         if status and status in typed and current is not None and typed[status] != current.get(status):
@@ -262,9 +290,14 @@ class Writer:
                     row[c] = self._coerce(self._default(spec["default"]), w.types[c])
         self._references(w, row, errors)
         self._rules(w, row, errors)
+        self._column_grants(w, typed, current, errors)
         self._parent(w, row, errors)
         if errors:
             raise WriteError(errors)
+        if not self._within(w, row):  # the user's own values may not leave the user's rows
+            raise WriteError({"": [self._outside(w)]})
+        if hidden:  # inside the user's rows by its values, yet hidden: nothing to say about it
+            raise WriteError({"": ["this row cannot be saved"]})
         now = datetime.now().replace(microsecond=0)
         key = {k: row[k] for k in w.key}
         if current is not None:
@@ -279,9 +312,13 @@ class Writer:
                                      f"({', '.join(_lit(row[c]) for c in cols)})")
         return key
 
-    def delete(self, entity: str, key: dict):
+    def delete(self, entity: str, key: dict, via_form: str | None = None):
         w = find(self.project, entity)
-        where = self._key_where(w, {k: self._coerce(key.get(k), w.types[k]) for k in w.key})
+        self._may_write(w, via_form)
+        typed = {k: self._coerce(key.get(k), w.types[k]) for k in w.key}
+        if self.get(entity, typed) is None:
+            raise WriteError({"": [NOT_FOUND]})  # hidden or gone: the same answer (ADR-013)
+        where = self._key_where(w, typed)
         _to_history(self.project, w, where, "delete", self.who)
         self.project.con.execute(f"DELETE FROM {_qt(w.table)} WHERE {where}")
 
@@ -297,8 +334,9 @@ class Writer:
                 out.append(name)
         return out
 
-    def transition(self, entity: str, key: dict, name: str) -> str:
+    def transition(self, entity: str, key: dict, name: str, via_form: str | None = None) -> str:
         w = find(self.project, entity)
+        self._may_write(w, via_form)
         row = self.get(entity, {k: self._coerce(key.get(k), w.types[k]) for k in w.key})
         tr = ((w.workflow or {}).get("transitions") or {}).get(name)
         if row is None or tr is None:
@@ -315,6 +353,39 @@ class Writer:
         self.project.con.execute(f"UPDATE {_qt(w.table)} SET {_q(col)} = {_lit(tr['to'])}, updated_by = "
                                  f"{_lit(self.who)}, updated_at = {_lit(now)} WHERE {where}")
         return tr["to"]
+
+    # ---- access (ADR-013)
+
+    def _may_write(self, w: Writable, via_form: str | None):
+        if not self.grants.can_write(w.entity, via_form):
+            how = f"form `{via_form}`" if via_form else f"`{w.entity}`"
+            raise WriteError({"": [f"{self.who} may not write {how}; access.yaml grants it to no role of theirs"]})
+
+    def _exists_hidden(self, w: Writable, key: dict) -> bool:
+        """The row exists but lies outside the user's rows."""
+        return bool(self.project.con.sql(f"SELECT 1 FROM {_qt(w.table)} WHERE {self._key_where(w, key)} "
+                                         f"LIMIT 1").fetchall())
+
+    def _within(self, w: Writable, row: dict) -> bool:
+        eng = self.engine(w.model)
+        cond = eng.row_condition(w.entity, "r")
+        if cond is None:
+            return True
+        values = ", ".join(f"{_lit(row.get(c))}::{SQL_TYPES.get(t, 'VARCHAR')} AS {_q(c)}" for c, t in w.types.items())
+        return bool(self.project.con.sql(f"SELECT 1 FROM (SELECT {values}) AS r WHERE {cond}").fetchall())
+
+    def _outside(self, w: Writable) -> str:
+        rules = "; ".join(f"`{e}`: `{c}`" for e, c in self.engine(w.model).access_rules(w.entity))
+        return f"this row is outside the rows {self.who} may write ({rules})"
+
+    def _column_grants(self, w: Writable, typed: dict, current: dict | None, errors: dict):
+        for c, v in typed.items():
+            if self.grants.can_write_column(w.entity, c):
+                continue
+            changed = v != (current or {}).get(c) if current is not None else v is not None
+            if changed:
+                errors.setdefault(c, []).append(f"`{c}` may be written only by "
+                                                f"{', '.join(self.grants.column_writers(w.entity, c))}")
 
     # ---- rules
 
@@ -387,7 +458,7 @@ class Writer:
         parent = w.spec.get("per")
         if not isinstance(parent, str):
             return
-        eng = self.project.engine(w.model)
+        eng = self.engine(w.model)
         keys = eng.idx.key_columns(parent)
         if any(row.get(k) is None for k in keys):
             errors.setdefault("", []).append(f"the {parent} key ({', '.join(keys)}) is required")

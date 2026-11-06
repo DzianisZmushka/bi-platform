@@ -10,6 +10,7 @@ The full formats are in the JSON Schemas in [packages/formats/src/obi_formats/sc
 - Names, grain and filters: [ADR-005](../../docs/adr/005-references-grain-and-filter-scope.md)
 - Expressions: [expressions.md](../../docs/formats/expressions.md)
 - Forms and writable entities: [forms.md](../../docs/formats/forms.md) and [ADR-012](../../docs/adr/012-forms-and-writable-entities.md)
+- Roles and row-level security: [access.md](../../docs/formats/access.md) and [ADR-013](../../docs/adr/013-roles-before-deploy.md)
 
 **Key order** (what `obi-formats fmt` produces, so write it this way): the kind key first (`kpi: id`, `sum: ...`), then `title`/`label`/`description`, then bindings (`measure`, `x`, `y`, `rows`, `values`, `where`, `grain`, `ignore_filters`), then behaviour (`sort`, `limit`, `totals`, `on_click`, `visible`), then presentation (`format`, `color`, `cells`), and `items` last.
 
@@ -71,3 +72,22 @@ uv run obi serve examples/sales-demo --user alice
 ```
 
 `obi serve` creates and seeds `.obi/sales-demo.duckdb` on first start, and migrates it when the model changes. Delete the file to start over. `obi migrate examples/sales-demo --reseed targets` reloads the targets from the CSV, moving the edited rows to history.
+
+## Who sees what (`access.yaml`)
+
+The pattern: **put `access:` on the smallest master-data entity every fact joins, not on the facts.**
+- Here that is `regions`: `access: { where: region_code in user.regions }`.
+- `order_lines` (through `customers`), `returns`, `targets` and `kpi_comments` all reach `regions`, so this one line limits every number, filter choice, sheet row and write to the user's regions.
+- The attribute holds region **keys** (`emea`, `na`), which is why `regions` has `region_code: { column: region_id }`. Display names can change; keys do not.
+
+`access.yaml` gives everyone (`default`) every dashboard and form to view and every entity to read. The other roles add only what they need:
+- `sales_rep` edits `kpi-comment`;
+- `sales_manager` edits every form, including the `targets` sheet;
+- `admin` sees every row (`rows: all`).
+
+`order_lines.unit_cost` is readable only by `sales_manager` and `admin`, so reps and viewers see "No access" on the margin widgets.
+
+```bash
+uv run obi serve examples/sales-demo --user rob --role sales_rep --attr regions=emea
+uv run obi serve examples/sales-demo --user mia --role sales_manager --attr regions=emea,na
+```

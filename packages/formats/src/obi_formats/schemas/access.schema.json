@@ -1,0 +1,210 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://obi.dev/schemas/access.schema.json",
+  "title": "Access",
+  "description": "access.yaml at the root of a project: roles as named sets of permissions, the user attributes the model may use, and column restrictions. Users and role membership are never here; they come from `obi serve` options now and an identity provider later (ADR-013).",
+  "$ref": "#/$defs/access",
+  "$defs": {
+    "access": {
+      "type": "object",
+      "x-kind": "access",
+      "properties": {
+        "access": {
+          "$ref": "#/$defs/artifact_id",
+          "description": "The project id."
+        },
+        "description": {
+          "type": "string"
+        },
+        "attributes": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/id"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/attribute"
+          },
+          "description": "User attributes the model may read as `user.<name>`, so the identity-provider mapping is explicit. `user.name` and `user.roles` always exist and are not listed."
+        },
+        "roles": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "$ref": "#/$defs/id"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/role"
+          },
+          "description": "Named sets of permissions. `default` applies to everyone. A user's permissions are the union of `default` and their roles, minus every `deny` of those roles."
+        },
+        "columns": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*\\.[A-Za-z_][A-Za-z0-9_]*$",
+            "x-error": "is not `<entity>.<column>`, such as `order_lines.unit_cost`"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/column_rule"
+          },
+          "description": "Columns that only the listed roles may read or write. Other columns follow their entity's `read`/`write`."
+        }
+      },
+      "required": [
+        "access",
+        "roles"
+      ],
+      "additionalProperties": false
+    },
+    "attribute": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "string",
+            "number",
+            "list"
+          ],
+          "description": "Default `string`. `list` holds several values (`sales_orgs`), used with `in` and `.includes(x)`."
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "role": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "view": {
+          "$ref": "#/$defs/artifacts",
+          "description": "Dashboards and forms (or sheets) the role may open. A form opened without `edit` is read-only."
+        },
+        "edit": {
+          "$ref": "#/$defs/form_artifacts",
+          "description": "Forms and sheets the role may submit. Implies `view`.",
+          "x-write-rule": true
+        },
+        "read": {
+          "$ref": "#/$defs/names",
+          "description": "Entities whose data the role may read, by name or `*`. Widgets that need an entity the user may not read show \"no access\"."
+        },
+        "write": {
+          "$ref": "#/$defs/names",
+          "description": "Writable entities the role may insert into and update, by name or `*`. Implies `read`.",
+          "x-write-rule": true
+        },
+        "rows": {
+          "enum": [
+            "all"
+          ],
+          "description": "`all`: the entities' `access:` conditions do not apply to this role (administrators)."
+        },
+        "deny": {
+          "$ref": "#/$defs/deny",
+          "description": "Taken away even when another role of the user allows it.",
+          "x-write-rule": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "deny": {
+      "type": "object",
+      "properties": {
+        "view": {
+          "$ref": "#/$defs/artifacts"
+        },
+        "edit": {
+          "$ref": "#/$defs/form_artifacts"
+        },
+        "read": {
+          "$ref": "#/$defs/names"
+        },
+        "write": {
+          "$ref": "#/$defs/names"
+        }
+      },
+      "additionalProperties": false
+    },
+    "artifacts": {
+      "type": "object",
+      "properties": {
+        "dashboards": {
+          "$ref": "#/$defs/patterns"
+        },
+        "forms": {
+          "$ref": "#/$defs/patterns"
+        }
+      },
+      "additionalProperties": false
+    },
+    "form_artifacts": {
+      "type": "object",
+      "properties": {
+        "forms": {
+          "$ref": "#/$defs/patterns"
+        }
+      },
+      "additionalProperties": false
+    },
+    "patterns": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9*][a-z0-9*-]*$",
+        "x-error": "is not an artifact id or pattern such as `order-*`"
+      },
+      "description": "Artifact ids, `*` matching any characters: `[order-*]`, `[\"*\"]`."
+    },
+    "names": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^([a-z][a-z0-9_]*|\\*)$",
+        "x-error": "is not an entity name or `*`"
+      }
+    },
+    "column_rule": {
+      "type": "object",
+      "minProperties": 1,
+      "properties": {
+        "read": {
+          "$ref": "#/$defs/role_list",
+          "description": "Only these roles may read the column. Measures and dimensions that use it show \"no access\" to others."
+        },
+        "write": {
+          "$ref": "#/$defs/role_list",
+          "description": "Only these roles may write the column, in forms and sheets of a writable entity.",
+          "x-write-rule": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "role_list": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/id"
+      },
+      "minItems": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "x-error": "is not a valid name: use lowercase letters, digits and underscores, starting with a letter"
+    },
+    "artifact_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+      "x-error": "is not a valid project id: use lowercase kebab-case such as `sales-demo`"
+    }
+  }
+}

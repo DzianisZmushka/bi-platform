@@ -106,3 +106,8 @@ table.sheet input { width: 100%; min-width: 90px; }
 .sheet-bulk { margin-top: 10px; }
 .sheet-history { margin-top: 10px; }
 .markdown.empty { color: var(--muted); }
+
+/* access (ADR-013) */
+.no-access { color: #6b7280; font-style: italic; padding: 12px 0; }
+.pending-banner { position: fixed; top: 0; left: 0; right: 0; z-index: 100; padding: 6px 16px;
+  background: #fef3c7; color: #78350f; border-bottom: 1px solid #f59e0b; font-size: 13px; }

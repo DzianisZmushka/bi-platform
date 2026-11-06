@@ -84,6 +84,7 @@ def validate_project(root: str | Path, overrides: dict[str, str] | None = None) 
     rels += sorted(p.relative_to(root).as_posix() for p in root.glob("model/*.model.yaml"))
     rels += sorted(p.relative_to(root).as_posix() for p in root.glob("dashboards/*/dashboard.yaml"))
     rels += sorted(p.relative_to(root).as_posix() for p in root.glob("forms/*.form.yaml"))
+    rels += ["access.yaml"] if (root / "access.yaml").is_file() else []
     rels += [r for r in overrides if r not in rels and artifact_type(r)]
 
     arts: list[_Artifact] = []
@@ -140,6 +141,11 @@ def validate_project(root: str | Path, overrides: dict[str, str] | None = None) 
             art.report(("dashboard",), None, f"dashboard id `{art.id}` does not match its folder "
                                               f"`{folder}`; rename one of them")
         _DashboardCheck(art, models, dashboards, broken, forms).run()
+
+    model_arts = {a.id: a for a in arts if a.type == "model"}
+    access = next((a for a in arts if a.type == "access"), None)
+    dash_ids = sorted({Path(r).parent.name for r in rels if artifact_type(r) == "dashboard"})
+    _check_access(access, models, model_arts, dash_ids, forms, catalog)
 
     return sorted(issues, key=lambda i: (i.file, i.line or 0))
 
@@ -239,6 +245,10 @@ def _check_unsupported(schema: Schema, report: _Reporter, value: Any, s: dict, p
             label, rest = _locate(schema, schema.root_name, list(path) + [k])
             report(path + (k,), label, f"`{_path_text(rest)}` is not supported yet: {sub['x-unsupported']}")
             continue
+        if "x-pending" in sub:  # accepted and checked, not enforced yet: said every time, never silent
+            label, rest = _locate(schema, schema.root_name, list(path) + [k])
+            report(path + (k,), label, f"`{_path_text(rest)}` is not enforced yet: {sub['x-pending']}", "warning")
+            continue  # one warning for the outermost pending property
         _check_unsupported(schema, report, v, sub, path + (k,))
 
 
@@ -1008,8 +1018,12 @@ class _ExprCheck:
                 self.walk(obj, True)
                 if meth != "includes" or len(args) != 1:
                     self.msgs.append(f"use `filters.{obj[2]}.includes(x)` with one argument")
+            elif obj[0] == "member" and obj[1] == ("name", "user"):
+                self.walk(obj, True)
+                if meth != "includes" or len(args) != 1:
+                    self.msgs.append(f"use `user.{obj[2]}.includes(x)` with one argument")
             else:
-                self.msgs.append("only `filters.<id>.includes(x)` can be called")
+                self.msgs.append("only `filters.<id>.includes(x)` and `user.<attribute>.includes(x)` can be called")
             for a in args:
                 self.walk(a)
             return
@@ -1033,3 +1047,165 @@ class _ExprCheck:
         if n == "filters":
             return f"{self.filter_ids[0]}.label" if self.filter_ids else "region.label"
         return "region"
+
+
+# =========================================================================== access.yaml (ADR-013)
+
+BUILTIN_USER = ("name", "roles")  # always present; never listed under `attributes`
+
+
+def _check_access(art: _Artifact | None, models: dict[str, ModelIndex], model_arts: dict[str, _Artifact],
+                  dashboards: list[str], forms: dict[str, _Artifact], catalog: dict | None):
+    """access.yaml names only things that exist, and every `user.*` the models read is declared."""
+    uses = [(a, path, label, prop, mid) for mid, idx in models.items()
+            for a, path, label, prop in idx.user_attributes()]
+    if art is None:
+        for a, path, label, prop, mid in uses:
+            if prop == "access.where" and mid in model_arts:
+                model_arts[mid].report(path, label, "`access.where` needs access.yaml at the project root, with "
+                                                    f"`{a}` under `attributes`")
+                break
+        return
+    data = art.data
+    attrs = data.get("attributes") if isinstance(data.get("attributes"), dict) else {}
+    roles = data.get("roles") if isinstance(data.get("roles"), dict) else {}
+    role_names = list(roles)
+
+    # Every user attribute the model reads is declared, so the IdP mapping is explicit.
+    for a, path, label, prop, mid in uses:
+        if a in BUILTIN_USER or a in attrs:
+            continue
+        model_arts[mid].report(path, label, f"`{prop}` uses `user.{a}`, which access.yaml does not declare; add it "
+                                            f"under `attributes`" + did_you_mean(a, list(attrs) + list(BUILTIN_USER)))
+    for a in attrs:
+        if a in BUILTIN_USER:
+            art.report(("attributes", a), f"attribute `{a}`", f"`user.{a}` is built in; remove it from `attributes`")
+
+    entities = {e: (mid, idx) for mid, idx in models.items() for e in idx.entities}
+    writable = [e for e, (_, idx) in entities.items() if idx.is_writable(e)]
+    kinds = {"dashboards": dashboards, "forms": list(forms)}
+
+    def patterns(value, path, label, prop):
+        if not isinstance(value, dict):
+            return
+        for kind, pats in value.items():
+            if kind not in kinds:
+                continue  # the schema reports an unknown kind
+            for i, pat in enumerate(pats if isinstance(pats, list) else []):
+                if isinstance(pat, str) and not any(_glob(pat, x) for x in kinds.get(kind, [])):
+                    noun = kind[:-1]
+                    art.report(path + (kind, i), label, f"`{prop}.{kind}`: `{pat}` matches no {noun}; "
+                                                        f"{kind} are {', '.join(kinds.get(kind)) or 'none'}"
+                               + did_you_mean(pat, kinds.get(kind, [])))
+
+    def names(value, path, label, prop, only_writable=False):
+        for i, n in enumerate(value if isinstance(value, list) else []):
+            if not isinstance(n, str) or n == "*":
+                continue
+            if n not in entities:
+                art.report(path + (i,), label, f"`{prop}`: no entity `{n}` in any model" + did_you_mean(n, list(entities)))
+            elif only_writable and n not in writable:
+                art.report(path + (i,), label, f"`{prop}`: `{n}` is not a writable entity; writable: "
+                                               f"{', '.join(writable) or 'none'}")
+
+    for rn, r in roles.items():
+        if not isinstance(r, dict):
+            continue
+        label, base = f"role `{rn}`", ("roles", rn)
+        if rn == "default" and r.get("rows") == "all":
+            art.report(base + ("rows",), label, "`rows: all` on `default` lets every user see every row, so no "
+                                                "`access:` condition applies; give it to a role instead", "warning")
+        patterns(r.get("view"), base + ("view",), label, "view")
+        patterns(r.get("edit"), base + ("edit",), label, "edit")
+        names(r.get("read"), base + ("read",), label, "read")
+        names(r.get("write"), base + ("write",), label, "write", only_writable=True)
+        deny = r.get("deny") if isinstance(r.get("deny"), dict) else {}
+        patterns(deny.get("view"), base + ("deny", "view"), label, "deny.view")
+        patterns(deny.get("edit"), base + ("deny", "edit"), label, "deny.edit")
+        names(deny.get("read"), base + ("deny", "read"), label, "deny.read")
+        names(deny.get("write"), base + ("deny", "write"), label, "deny.write")
+
+    cols = data.get("columns") if isinstance(data.get("columns"), dict) else {}
+    for key, rule in cols.items():
+        label, path = f"column `{key}`", ("columns", key)
+        en, _, col = key.partition(".")
+        if en not in entities:
+            art.report(path, label, f"no entity `{en}` in any model" + did_you_mean(en, list(entities)))
+            continue
+        _, idx = entities[en]
+        known = _entity_columns(idx, en, catalog)
+        if known is not None and col not in known:
+            art.report(path, label, f"entity `{en}` has no column `{col}`" + did_you_mean(col, sorted(known)))
+        for prop in ("read", "write"):
+            for i, rname in enumerate((rule or {}).get(prop) or [] if isinstance(rule, dict) else []):
+                if rname not in roles:
+                    art.report(path + (prop, i), label, f"`{prop}`: no role `{rname}` in access.yaml"
+                               + did_you_mean(str(rname), role_names))
+        if isinstance(rule, dict) and rule.get("write") and not idx.is_writable(en):
+            art.report(path + ("write",), label, f"`write`: `{en}` is not a writable entity; only `read` applies")
+
+    # `edit` on a form implies `write` on its entity; a role cannot edit a form whose entity it
+    # (or `default`, which every user has) denies for writing.
+    def form_entity(fid: str):
+        e = forms[fid].data.get("entity")
+        return e if isinstance(e, str) else None
+
+    def edited_forms(r: dict) -> list[str]:
+        pats = ((r.get("edit") or {}).get("forms") or []) if isinstance(r.get("edit"), dict) else []
+        return [fid for fid in forms if any(isinstance(p, str) and _glob(p, fid) for p in pats)]
+
+    def denied_write(r: dict) -> list:
+        d = r.get("deny") if isinstance(r.get("deny"), dict) else {}
+        return d.get("write") or [] if isinstance(d.get("write") or [], list) else []
+
+    default_denied = denied_write(roles.get("default") or {}) if isinstance(roles.get("default"), dict) else []
+    for rn, r in roles.items():
+        if not isinstance(r, dict):
+            continue
+        for fid in edited_forms(r):
+            entity = form_entity(fid)
+            for who, denied in ((f"role `{rn}`", denied_write(r)), ("role `default`", default_denied)):
+                if entity and any(n in ("*", entity) for n in denied):
+                    art.report(("roles", rn, "edit"), f"role `{rn}`",
+                               f"`edit` on form `{fid}` writes `{entity}`, which {who} denies in `deny.write`; "
+                               f"remove one of them")
+                    break
+
+    # A writable entity that a form writes needs a role that may write it.
+    def may_write(entity: str) -> bool:
+        return any(isinstance(r, dict) and (any(n in ("*", entity) for n in r.get("write") or [])
+                                            or any(form_entity(f) == entity for f in edited_forms(r)))
+                   for r in roles.values())
+
+    for fid, f in forms.items():
+        entity = f.data.get("entity")
+        if isinstance(entity, str) and entity in writable and not may_write(entity):
+            art.report(("roles",), None, f"form `{fid}` writes `{entity}`, but no role may edit it or write "
+                                         f"`{entity}`; add it to a role's `edit`", "warning")
+
+    # Facts that no access rule reaches show every row to every user.
+    for mid, idx in models.items():
+        if not any(isinstance(e.get("access"), dict) for e in idx.entities.values()):
+            continue
+        for en in idx.entities:
+            declared = idx.entities[en].get("joins") if isinstance(idx.entities[en].get("joins"), dict) else {}
+            if any(t in idx.entities and idx.covered(t) for t in declared):
+                continue  # a join toward a covered entity is declared; if it is broken, that is its own error
+            if any(f.kind == "measure" for f in idx.fields(en)) and not idx.covered(en):
+                model_arts[mid].report(("entities", en), f"entity `{en}`",
+                                       f"not covered by any access rule: `{en}` has measures but no join path to "
+                                       f"an entity with `access:`, so every user sees all of its rows; join it to "
+                                       f"one, or add `access:` to it", "warning")
+
+
+def _glob(pattern: str, name: str) -> bool:
+    return re.fullmatch(re.escape(pattern).replace(r"\*", ".*"), name) is not None
+
+
+def _entity_columns(idx: ModelIndex, entity: str, catalog: dict | None) -> set[str] | None:
+    """Columns of an entity's table: declared for writable entities, else from the catalogue."""
+    if idx.is_writable(entity):
+        return set(idx.table_columns(entity))
+    table = idx.entities[entity].get("table")
+    cols = catalog.get(table) if catalog else None
+    return set(cols) if isinstance(cols, list) else None

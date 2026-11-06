@@ -18,13 +18,15 @@ from typing import Any
 
 from jsonschema import Draft202012Validator
 
-ARTIFACT_TYPES = ("project", "model", "dashboard", "form")
+ARTIFACT_TYPES = ("project", "model", "dashboard", "form", "access")
 
 
 def artifact_type(path: str | PurePath) -> str | None:
     name = PurePath(path).name
     if name == "project.yaml":
         return "project"
+    if name == "access.yaml":
+        return "access"
     if name.endswith(".model.yaml"):
         return "model"
     if name.endswith(".form.yaml"):

@@ -13,9 +13,11 @@ import pytest
 from obi_engine import Project, SemanticQuery
 from obi_engine.store import WriteError, Writer, auto_migrate, migrate, plan
 
+# Every region and sales org: these tests are about the write rules, not about access (test_access_*.py).
+ALL_ROWS = {"regions": ["emea", "na", "apac", "latam"], "sales_orgs": ["DE01", "PL01", "AE01", "US01", "US02"]}
 EXAMPLES = Path(os.environ["OBI_EXAMPLES"])
-MANAGER = {"name": "mia", "role": "sales_manager"}
-SALES = {"name": "bob", "role": "sales"}
+MANAGER = {"name": "mia", "roles": ["sales_manager"], **ALL_ROWS}
+SALES = {"name": "bob", "roles": ["sales_rep"], **ALL_ROWS}
 
 
 def fresh(tmp_path, name) -> Project:
@@ -59,7 +61,7 @@ def test_migrate_creates_tables_with_audit_and_history_and_is_idempotent(tmp_pat
 
 
 def test_reseed_moves_current_rows_to_history(demo):
-    w = Writer(demo, SALES)
+    w = Writer(demo, MANAGER)
     w.save("targets", {"month": "2026-01-01", "region_id": "emea", "revenue_target": "1"})
     done = migrate(demo, reseed=("targets",))
     assert any(d.startswith("seeded `targets`") for d in done)
@@ -72,7 +74,7 @@ def test_reseed_moves_current_rows_to_history(demo):
 
 
 def test_write_rules_name_the_column_and_the_rule(demo):
-    w = Writer(demo, SALES)
+    w = Writer(demo, MANAGER)
     with pytest.raises(WriteError) as e:
         w.save("targets", {"month": "2026-01-15", "region_id": "Atlantis", "revenue_target": "-5"})
     assert e.value.errors == {
@@ -83,7 +85,7 @@ def test_write_rules_name_the_column_and_the_rule(demo):
     with pytest.raises(WriteError) as e:
         w.save("kpi_comments", {"kpi": "profit", "month": "2026-11-01", "comment": ""})
     assert e.value.errors == {"kpi": ["must be one of revenue, attainment, margin, returns"],
-                              "comment": ["is required"]}
+                              "region_id": ["is required"], "comment": ["is required"]}
     with pytest.raises(WriteError) as e:
         w.save("targets", {"month": "soon", "region_id": "emea", "revenue_target": "1"})
     assert e.value.errors["month"] == ["`soon` is not a valid date"]
@@ -91,28 +93,28 @@ def test_write_rules_name_the_column_and_the_rule(demo):
 
 def test_reference_display_value_is_saved_as_the_key(demo):
     """A default such as `${filters.region.first}` gives `EMEA`; the row stores `emea`."""
-    w = Writer(demo, {"name": "alice"})
+    w = Writer(demo, {"name": "alice", "roles": ["sales_rep"], **ALL_ROWS})
     key = w.save("kpi_comments", {"kpi": "revenue", "region_id": "EMEA", "month": "2026-11-01", "comment": "ok"})
     row = w.get("kpi_comments", key)
     assert row["region_id"] == "emea" and row["created_by"] == "alice" and key == {"comment_id": 1}
 
 
 def test_update_keeps_the_prior_version_in_history(demo):
-    w = Writer(demo, SALES)
+    w = Writer(demo, MANAGER)
     key = {"month": date(2026, 1, 1), "region_id": "emea"}
     before = w.get("targets", key)["revenue_target"]
     w.save("targets", {**key, "revenue_target": before * 3})
     assert w.get("targets", key)["revenue_target"] == before * 3
     hist = w.history("targets", key)
     assert hist[0]["history_op"] == "update" and hist[0]["revenue_target"] == before
-    assert hist[0]["history_by"] == "bob"
+    assert hist[0]["history_by"] == "mia"
 
 
 def test_edited_target_changes_attainment(demo):
     eng = demo.engine("sales")
     q = SemanticQuery(["target_attainment"], ["region"])
     before = {r["region"]: r["target_attainment"] for r in eng.query(q).to_pylist()}
-    Writer(demo, SALES).save("targets", {"month": "2026-01-01", "region_id": "emea", "revenue_target": "948000"})
+    Writer(demo, MANAGER).save("targets", {"month": "2026-01-01", "region_id": "emea", "revenue_target": "948000"})
     after = {r["region"]: r["target_attainment"] for r in eng.query(q).to_pylist()}
     assert after["EMEA"] < before["EMEA"] and after["APAC"] == before["APAC"]
 
@@ -158,7 +160,7 @@ def test_workflow_submit_then_approve_by_manager_only(erp):
     assert bob.transitions("order_notes", bob.get("order_notes", key)) == []
     with pytest.raises(WriteError) as e:
         bob.transition("order_notes", key, "approve")
-    assert e.value.errors == {"status": ["`approve` is not allowed for bob (`${user.role == 'sales_manager'}`)"]}
+    assert e.value.errors == {"status": ["`approve` is not allowed for bob (`${user.roles.includes('sales_manager')}`)"]}
     assert mia.transitions("order_notes", mia.get("order_notes", key)) == ["approve", "reopen"]
     assert mia.transition("order_notes", key, "approve") == "approved"
     with pytest.raises(WriteError) as e:

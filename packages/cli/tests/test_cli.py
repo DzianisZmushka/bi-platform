@@ -155,3 +155,10 @@ def test_serve_footer_names_project_and_commit(tmp_path):
     assert "this server runs older code. Restart <code>obi serve</code>" in stale
     html = render_dashboard(DEMO.parent / "erp-sales", "order-to-cash", None, AS_OF, mode="serve", footer=footer).html
     assert 'class="provenance"' in html
+
+
+def test_serve_user_splits_list_attributes():
+    from obi_cli.__main__ import serve_user
+
+    user = serve_user(DEMO.parent / "erp-sales", "mia", ["sales_manager"], ["sales_orgs=DE01, PL01", "team=north"])
+    assert user == {"name": "mia", "roles": ["sales_manager"], "sales_orgs": ["DE01", "PL01"], "team": "north"}

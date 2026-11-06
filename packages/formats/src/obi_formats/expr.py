@@ -1,7 +1,8 @@
 """The `${...}` expression language (docs/formats/expressions.md).
 
 Small on purpose: literals, names, member access, arithmetic, comparisons,
-`and`/`or`/`not`, the ternary `a ? b : c`, and one method, `filters.<id>.includes(x)`.
+`and`/`or`/`not`, the ternary `a ? b : c`, and one method, `.includes(x)`, on
+`filters.<id>` and on list-valued `user.<attribute>` (such as `user.roles`).
 No loops, assignments or user-defined functions.
 
 AST nodes are tuples:
@@ -258,6 +259,10 @@ def evaluate(node, ctx: dict[str, Any]):
         obj = evaluate(node[1], ctx)
         if isinstance(obj, FilterSelection) and node[2] == "includes" and len(node[3]) == 1:
             return obj.includes(evaluate(node[3][0], ctx))
+        if isinstance(obj, (list, tuple)) and node[2] == "includes" and len(node[3]) == 1:  # user.roles
+            return evaluate(node[3][0], ctx) in obj
+        if obj is None and node[2] == "includes":  # a missing user attribute includes nothing
+            return False
         return None
     if t == "unary":
         x = evaluate(node[2], ctx)

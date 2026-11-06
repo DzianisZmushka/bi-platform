@@ -4,7 +4,7 @@
     obi catalog  [PROJECT]
     obi migrate  [PROJECT] [--reseed TABLE]
     obi render   [PROJECT] [--dashboard ID] [--out DIR] [--filter ID=V1,V2] [--as-of DATE]
-    obi serve    [PROJECT] [--port 8765] [--as-of DATE] [--user NAME] [--user-attr KEY=VALUE]
+    obi serve    [PROJECT] [--port 8765] [--as-of DATE] [--user NAME] [--role ROLE] [--attr KEY=VALUE]
 
 `obi validate` is static: schemas, references, expressions, and columns from the committed
 catalog.json. It needs no data access, so it is what CI runs. `--execute` also checks
@@ -57,9 +57,11 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("project", nargs="?", default=".")
     s.add_argument("--port", type=int, default=8765)
     s.add_argument("--as-of", type=date.fromisoformat)
-    s.add_argument("--user", default="anonymous", help="the user forms write as (no sign-in before Phase 2)")
-    s.add_argument("--user-attr", action="append", default=[], metavar="KEY=VALUE",
-                   help="a user attribute, e.g. role=sales_manager; read by ${user.*} and workflow `by:`")
+    s.add_argument("--user", default="anonymous", help="the user forms write as (no sign-in before Phase 2b)")
+    s.add_argument("--role", action="append", default=[], metavar="ROLE",
+                   help="a role from access.yaml, repeatable; read as `user.roles`")
+    s.add_argument("--attr", "--user-attr", dest="attr", action="append", default=[], metavar="KEY=VALUE",
+                   help="a user attribute declared in access.yaml, e.g. regions=EMEA (list attributes: comma-separated)")
 
     g = sub.add_parser("migrate", help="create or alter the writable tables in the project's database file")
     g.add_argument("project", nargs="?", default=".")
@@ -88,10 +90,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "serve":
         from .server import serve
-        user = {"name": args.user}
-        for item in args.user_attr:
-            k, _, v = item.partition("=")
-            user[k.strip()] = v.strip()
+        user = serve_user(root, args.user, args.role, args.attr)
         serve(root, args.port, args.as_of, user)
         return 0
 
@@ -144,3 +143,20 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+def serve_user(root: Path, name: str, roles: list[str], attrs: list[str]) -> dict:
+    """The user `obi serve` acts as until sign-in (Phase 2b): name, roles, and attributes.
+    A list attribute in access.yaml (`type: list`) takes comma-separated values."""
+    from obi_formats.artifacts import parse
+
+    declared = {}
+    if (root / "access.yaml").is_file():
+        declared = parse((root / "access.yaml").read_text(encoding="utf-8")).data.get("attributes") or {}
+    user: dict = {"name": name, "roles": list(roles)}
+    for item in attrs:
+        k, _, v = item.partition("=")
+        k, v = k.strip(), v.strip()
+        kind = (declared.get(k) or {}).get("type")
+        user[k] = [x.strip() for x in v.split(",") if x.strip()] if kind == "list" else v
+    return user

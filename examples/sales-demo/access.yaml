@@ -1,0 +1,29 @@
+access: sales-demo
+description: Who may see and write what. Users and their roles are never in Git (ADR-013).
+
+# What the identity provider must supply about a user. Every `user.*` in the model is listed here.
+attributes:
+  regions:
+    type: list
+    description: Keys of the regions the user covers (emea, na, apac, latam), as in `region_code`. Without it a user sees no rows.
+
+roles:
+  default:
+    description: Everyone who signs in, before their own roles. Restricting what someone sees is done with `deny`.
+    view: { dashboards: ["*"], forms: ["*"] }
+    read: ["*"]
+  viewer: { description: Reads every dashboard and sheet for their regions; writes nothing. }
+  sales_rep:
+    description: Comments on the numbers of their regions.
+    edit: { forms: [kpi-comment] }
+  sales_manager:
+    description: Sets targets and comments for their regions.
+    edit: { forms: ["*"] }
+  admin:
+    description: Everything, every row.
+    edit: { forms: ["*"] }
+    rows: all
+
+# Columns readable or writable only by the roles listed; other columns follow their entity.
+columns:
+  order_lines.unit_cost: { read: [sales_manager, admin] }

@@ -223,6 +223,8 @@ def _scalar_value(node: ScalarNode):
         if low == ".nan":
             return float("nan")
         return float(low)
+    if node.style == ">":  # ruamel marks each fold with ; the folded value has a plain space there
+        v = v.replace("", "")
     return v  # str, and timestamps stay strings (JSON has no date type)
 
 

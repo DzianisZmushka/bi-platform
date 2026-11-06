@@ -22,7 +22,7 @@ The model hides the technical column names. Its decisions are in [ADR-009](../..
 | fiscal periods | `fiscal: { year, period }` on the date dimension; `date.fiscal_period`; presets such as `fiscal_year_to_date` |
 | a note per order item | `order_notes: { writable: true, per: order_items, columns: ... }`. The key is `VBELN`, `POSNR`; order items join it automatically (LEFT, so items without a note still show) |
 | planned shipments per sales org and week | writable `shipment_plans` (`VKORG`, `week_start`) seeded from `data/shipment_plans.csv`, edited in the `shipment-plan` sheet (no delete) and charted against deliveries by `date.week` on the page `shipment_plan`. Weeks are Monday-based, so the week of 2026-03-30 falls in the old fiscal year (see the ADR-009 follow-up) |
-| draft → submitted → approved | `workflow: { column: status, transitions: { approve: { from: submitted, to: approved, by: "${user.role == 'sales_manager'}" } } }` |
+| draft → submitted → approved | `workflow: { column: status, transitions: { approve: { from: submitted, to: approved, by: "${user.roles.includes('sales_manager')}" } } }` |
 
 `order_value` is in document currency, so it may only appear in a widget that also shows `document_currency`. Use `order_value_usd` everywhere else.
 
@@ -32,8 +32,15 @@ Click a row in **Largest open order items** to open the `order-note` form for th
 
 ```bash
 uv run obi validate examples/erp-sales --execute
-uv run obi serve examples/erp-sales --user bob --user-attr role=sales
-uv run obi serve examples/erp-sales --user mia --user-attr role=sales_manager
+uv run obi serve examples/erp-sales --user bob --role sales_rep --attr sales_orgs=DE01
+uv run obi serve examples/erp-sales --user mia --role sales_manager --attr sales_orgs=DE01,PL01
 ```
 
 Run one server at a time: DuckDB lets one process open `.obi/erp-sales.duckdb`.
+
+**Who sees what.** `access:` sits on `sales_orgs`, the smallest master-data entity every fact joins, not on the facts: `access: { where: sales_org_code in user.sales_orgs }` ([access.md](../../docs/formats/access.md)).
+- Orders, items, deliveries, billing, notes (through their order item) and the shipment plan all reach it, so one line limits them all.
+- The attribute holds VKORG keys (`DE01`), compared with the key dimension `sales_org_code`.
+- `--role sales_rep --attr sales_orgs=DE01` sees only Germany's numbers, and may write notes only on DE01 items.
+- An `auditor` never writes, whatever other roles they hold (`deny`).
+- Cost (`order_items.WAVWR`) is readable only by managers and admins, so others see "No access" on margin.

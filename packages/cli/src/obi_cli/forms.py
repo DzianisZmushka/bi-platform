@@ -15,7 +15,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlencode
 
 from obi_engine import Project, dates
-from obi_engine.store import Writer, WriteError, find
+from obi_engine.store import NOT_FOUND, Writer, WriteError, find
 from obi_formats.artifacts import parse
 from obi_formats.expr import ExprError, render as render_expr
 
@@ -69,7 +69,12 @@ class FormContext:
         self.project, self.user, self.selections, self.mode = project, user, selections, mode
         self.here, self.state, self.query = here or "/", state or {}, query or {}
         self.as_of = as_of or date.today()
-        self.writer = Writer(project, user)
+        self.user = user or {}
+        self.writer = Writer(project, project.user)  # the project's user; none: the system
+
+    def editable(self, fid: str) -> bool:
+        """Whether this form saves here: in `obi serve`, for a user whose roles may edit it."""
+        return self.mode == "serve" and self.writer.grants.can_edit_form(fid)
 
     def expr(self, text):
         if not isinstance(text, str) or "${" not in text:
@@ -103,7 +108,7 @@ def render_form(ctx: FormContext, fid: str, form: dict, navigate_href=None) -> s
         values.update({c: row.get(c) for c in w.types})
     values.update(state.get("values") or {})
     errors = state.get("errors") or {}
-    live = ctx.mode == "serve"
+    live = ctx.editable(fid)
     title = form.get("title") or fid
     parts = [f'<form class="obi-form" method="post" action="/_write">'
              f'<input type="hidden" name="_form" value="{esc(fid)}">'
@@ -145,7 +150,9 @@ def render_form(ctx: FormContext, fid: str, form: dict, navigate_href=None) -> s
                                f'class="secondary">{esc(tname.capitalize())}</button>')
         parts.append(f'<div class="form-buttons">{"".join(buttons)}</div>')
     else:
-        parts.append('<p class="desc">Forms save in <code>obi serve</code>.</p>')
+        parts.append('<p class="desc">' + ("You may view this form, but none of your roles may edit it."
+                                            if ctx.mode == "serve" else "Forms save in <code>obi serve</code>.")
+                     + "</p>")
     parts.append("</form>")
     return head + "".join(parts)
 
@@ -178,7 +185,7 @@ def _control(ctx, entity, name, widget, spec, value, required, readonly, form_id
 def render_sheet(ctx: FormContext, sid: str, sheet: dict) -> str:
     w = find(ctx.project, sheet["entity"])
     allow = set(sheet.get("allow") or ALL_ACTIONS)
-    live = ctx.mode == "serve"
+    live = ctx.editable(sid)
     cols = list(sheet["columns"])
     readonly = set(sheet.get("readonly") or [])
     if w.workflow:
@@ -209,7 +216,7 @@ def render_sheet(ctx: FormContext, sid: str, sheet: dict) -> str:
     out = [f'<div class="widget-title">{esc(sheet.get("title") or sid)}</div>']
     if sheet.get("description"):
         out.append(f'<p class="desc">{esc(sheet["description"])}</p>')
-    if fparts and live:
+    if fparts and ctx.mode == "serve":  # filtering is reading, not editing
         keep = "".join(f'<input type="hidden" name="{esc(k)}" value="{esc(v)}">' for k, vs in ctx.query.items()
                        for v in vs if not k.startswith(f"sf.{sid}."))
         out.append(f'<form class="filters" method="get">{keep}{"".join(fparts)}<button>Filter</button></form>')
@@ -329,13 +336,16 @@ def handle_post(project: Project, user: dict, forms: dict[str, dict], body: dict
     entity = spec["entity"]
     values = {k: v for k, v in one.items() if not k.startswith("_")}
     try:
+        if not writer.grants.can_edit_form(fid):  # decided here, whatever the page showed
+            raise WriteError({"": [f"{writer.who} may not edit {'form' if 'form' in spec else 'sheet'} `{fid}`; "
+                                   f"access.yaml gives `edit` on it to none of their roles"]})
         w = find(project, entity)
         if "form" in spec:
             data = _form_values(spec, w, writer, values)
             if action.startswith("transition:"):
-                writer.transition(entity, {k: data.get(k) for k in w.key}, action.split(":", 1)[1])
+                writer.transition(entity, {k: data.get(k) for k in w.key}, action.split(":", 1)[1], via_form=fid)
             elif action == "save":
-                writer.save(entity, data)
+                writer.save(entity, data, via_form=fid)
             else:
                 raise WriteError({"": [f"unknown action `{action}`"]})
             return one.get("_next") or back, None
@@ -348,13 +358,13 @@ def handle_post(project: Project, user: dict, forms: dict[str, dict], body: dict
         if action in ("sheet_save", "sheet_delete"):
             key = json.loads(one.get("_key") or "{}")
             if action == "sheet_delete":
-                writer.delete(entity, key)
+                writer.delete(entity, key, via_form=fid)
             else:
-                writer.save(entity, _sheet_edit(spec, w, writer, key, values), row_key=key)
+                writer.save(entity, _sheet_edit(spec, w, writer, key, values), row_key=key, via_form=fid)
             return back, None
         editable = _sheet_new_columns(spec, w)
         if action == "sheet_add":
-            writer.save(entity, _sheet_new(spec, w, values, editable))
+            writer.save(entity, _sheet_new(spec, w, values, editable), via_form=fid)
             return back, None
         text = one.get("_rows") or ""
         if action == "sheet_paste":
@@ -373,7 +383,7 @@ def handle_post(project: Project, user: dict, forms: dict[str, dict], body: dict
             for n, rec in enumerate(records, 1):
                 try:
                     clean = {c: v for c, v in rec.items() if c is not None}
-                    writer.save(entity, _sheet_new(spec, w, clean, editable))
+                    writer.save(entity, _sheet_new(spec, w, clean, editable), via_form=fid)
                 except WriteError as e:
                     problems.append(f"row {n}: " + "; ".join(f"{c}: {m}" if c else m
                                                               for c, ms in e.errors.items() for m in ms))
@@ -452,8 +462,8 @@ def _sheet_locked(spec: dict, w) -> set[str]:
 def _sheet_edit(spec: dict, w, writer, key: dict, values: dict) -> dict:
     errors = _foreign(values, list(spec["columns"]), w, f"sheet `{spec['sheet']}`")
     current = writer.get(spec["entity"], {k: writer._coerce(key.get(k), w.types[k]) for k in w.key})
-    if current is None:
-        raise WriteError({"": ["the row no longer exists; reload the sheet"]})
+    if current is None:  # hidden or gone: the same answer, never "outside your rows" (ADR-013)
+        raise WriteError({"": [NOT_FOUND]})
     locked = _sheet_locked(spec, w)
     for c in locked:
         if c in values and not _same(writer, values[c], current.get(c), w.types.get(c, "string")):

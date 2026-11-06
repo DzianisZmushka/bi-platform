@@ -18,7 +18,7 @@ from urllib.parse import urlencode
 
 from markdown_it import MarkdownIt
 
-from obi_engine import EngineError, Filter, Project, SemanticQuery, humanize
+from obi_engine import EngineError, Filter, NoAccess, Project, SemanticQuery, humanize
 from obi_engine import dates
 
 from .forms import FormContext, load_forms, render_form, render_sheet
@@ -205,7 +205,7 @@ def render_dashboard(root: str | Path, dash_id: str, inputs: dict[str, list[str]
                      here: str = "", form_state: dict | None = None,
                      query: dict | None = None) -> RenderResult:
     root = Path(root)
-    project = Project(root)
+    project = Project(root, user)  # a user (obi serve) sees only their rows; none: the system
     dashboards = {}
     for p in sorted(root.glob("dashboards/*/dashboard.yaml")):
         d = parse(p.read_text(encoding="utf-8")).data
@@ -282,6 +282,10 @@ def _node(page: _Page, node: dict, page_id: str) -> str:
         inner = {"kpi": _kpi, "chart": _chart, "table": _table, "text": _text, "button": _button,
                  "form": _form}[kind](
             page, node, page_id)
+    except Hidden:
+        return ""
+    except NoAccess as e:  # decided on the server; the page only shows it
+        inner = f'<div class="no-access" title="{esc(str(e))}">No access</div>'
     except Exception as e:  # one broken widget must not hide the rest of the dashboard
         if not isinstance(e, FilterUnusable):  # that one is listed once, for the filter
             page.errors.append(f"{kind} `{nid}`: {e}")
@@ -609,6 +613,8 @@ def _cell(page: _Page, val, fmt: str, cfg: dict | None, row: dict, maxabs: float
 def _form(page: _Page, f: dict, page_id: str) -> str:
     """An embedded form or sheet (ADR-012): its `${filters.*}` defaults read this dashboard."""
     spec = page.forms[f["form"]]
+    if not page.project.grants.can_view_form(f["form"]):
+        raise Hidden()  # a form the user may not see is left out, not shown as an error
     # The browser never sends `#page` to the server, so the return address names the page.
     here = (page.here.split("#")[0] or f"/{page.dash_id}") + f"#{page_id}"
     ctx = FormContext(page.project, page.user, page.selections, page.mode, here, page.form_state, page.query,
@@ -714,6 +720,10 @@ def _dim_text(page: _Page, ref: str, v) -> str:
 
 def _json_row(r: dict) -> dict:
     return {k: (v.isoformat() if isinstance(v, (date, datetime)) else v) for k, v in r.items()}
+
+
+class Hidden(Exception):
+    """The user may not see this widget at all; it is omitted from the page."""
 
 
 class FilterUnusable(ValueError):
@@ -836,10 +846,12 @@ def _document(page: _Page, body: str, footer: str = "") -> str:
 def render_form_page(root: str | Path, fid: str, user: dict, here: str, form_state: dict | None,
                      query: dict, footer: str = "", as_of: date | None = None) -> str:
     """A form or sheet opened on its own (`/forms/<id>`): no dashboard, so `${filters.*}` are empty."""
-    project = Project(Path(root))
+    project = Project(Path(root), user)
     forms = load_forms(root)
     if fid not in forms:
         return f"<!doctype html><title>Not found</title><p>No form <code>{esc(fid)}</code>.</p>"
+    if not project.grants.can_view_form(fid):
+        return f"<!doctype html><title>No access</title><p>No access to form <code>{esc(fid)}</code>.</p>"
     spec = forms[fid]
     ctx = FormContext(project, user, {}, "serve", here, form_state, query, as_of)
     inner = render_sheet(ctx, fid, spec) if "sheet" in spec else render_form(ctx, fid, spec)

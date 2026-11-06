@@ -240,6 +240,24 @@ class ModelIndex:
             out.setdefault(child, keys if len(keys) > 1 else keys[0])
         return out
 
+    def rls_targets(self, entity: str) -> dict[str, object]:
+        """Joins that carry row-level security: many-to-one joins this entity declares, without
+        the reverse joins that `per` implies (a note does not restrict its order item)."""
+        return {t: fk for t, fk in self.joins(entity).items() if self.entities[t].get("per") != entity}
+
+    def covered(self, entity: str, _stack: tuple = ()) -> bool:
+        """Whether an `access:` rule limits this entity's rows: its own, its `per` parent's, or
+        that of any entity it joins, directly or through other entities (ADR-013)."""
+        if entity in _stack:
+            return False
+        e = self.entities.get(entity, {})
+        if isinstance(e.get("access"), dict):
+            return True
+        parent = e.get("per")
+        if isinstance(parent, str) and parent in self.entities and self.covered(parent, _stack + (entity,)):
+            return True
+        return any(self.covered(t, _stack + (entity,)) for t in self.rls_targets(entity))
+
     def key_columns(self, entity: str) -> list[str]:
         e = self.entities[entity]
         if e.get("writable") is True and isinstance(e.get("per"), str) and e["per"] in self.entities \
@@ -358,6 +376,8 @@ class ModelIndex:
         self._check_currency(report)
         self._check_lookups_rollups_dates(report)
         self._check_writable(report)
+        self._check_access(report)
+        self._check_access_columns(report)
         for h, levels in self.hierarchies.items():
             for i, level in enumerate(levels):
                 try:
@@ -368,6 +388,77 @@ class ModelIndex:
             if name in self.hierarchies:
                 report(("hierarchies", name), f"hierarchy `{name}`",
                        f"`{name}` is also the name of {lst[0].kind} `{lst[0].qualified}`; rename the hierarchy")
+
+    def _check_access(self, report: Report):
+        """`access: { where }` names dimensions reachable from the entity, like a measure's
+        `where:`, plus `user.<attribute>`. Attributes are checked against access.yaml by the
+        project validator (`user_attributes`)."""
+        for en, e in self.entities.items():
+            acc = e.get("access")
+            if not isinstance(acc, dict) or not isinstance(acc.get("where"), str):
+                continue
+            path, label = ("entities", en, "access", "where"), f"entity `{en}`"
+            try:
+                tree = parse_colexpr(acc["where"])
+            except ColExprError as err:
+                report(path, label, f"`access.where`: {err.message}")
+                continue
+            own = [f.name for f in self.fields(en) if f.kind == "dimension" and not self.lookup(f)]
+            for text, col in references(tree):
+                if text.startswith("user."):
+                    continue
+                name = text.split(".", 1)[1] if text.startswith(f"{en}.") else text
+                if name not in own:
+                    report(path, label, f"`access.where` may use only dimensions of entity `{en}` itself (joined "
+                                        f"entities are covered by their own `access:`); `{text}` is not one of "
+                                        f"{', '.join(own) or 'none'}" + did_you_mean(name, own))
+            if not any(text.startswith("user.") for text, _ in references(tree)):
+                report(path, label, "`access.where` does not use `user.*`, so every user gets the same rows; "
+                                    "compare a dimension with a user attribute, such as `region in user.regions`")
+
+    def _check_access_columns(self, report: Report):
+        """On a writable entity, a join column that row-level security runs through must be
+        `required`: a row without it joins none of anyone's rows (ADR-013)."""
+        for en, e in self.entities.items():
+            cols = e.get("columns") if isinstance(e.get("columns"), dict) else {}
+            if not self.is_writable(en):
+                continue
+            for target, fk in self.rls_targets(en).items():
+                if not self.covered(target):
+                    continue
+                for col in fk if isinstance(fk, list) else [fk]:
+                    spec = cols.get(col)
+                    if col in cols and not (isinstance(spec, dict) and spec.get("required") is True):
+                        report(("entities", en, "columns", col), f"entity `{en}`",
+                               f"`{col}` must be `required: true`: access reaches `{en}` through it (the join to "
+                               f"`{target}`); a row without it would be visible to nobody but `rows: all`")
+
+    def user_attributes(self) -> list[tuple[str, tuple, str, str]]:
+        """Every `user.<attribute>` the model reads: (attribute, path, element label, property).
+        From `access.where`, workflow `by:` and column `default:`."""
+        out = []
+        for en, e in self.entities.items():
+            acc = e.get("access")
+            if isinstance(acc, dict) and isinstance(acc.get("where"), str):
+                try:
+                    tree = parse_colexpr(acc["where"])
+                except ColExprError:
+                    tree = None
+                for text, _ in references(tree) if tree is not None else []:
+                    if text.startswith("user."):
+                        out.append((text.split(".", 1)[1], ("entities", en, "access", "where"), f"entity `{en}`",
+                                    "access.where"))
+            wf = e.get("workflow")
+            for tn, tr in ((wf or {}).get("transitions") or {}).items() if isinstance(wf, dict) else []:
+                if isinstance(tr, dict) and isinstance(tr.get("by"), str):
+                    for a in _template_user_attrs(tr["by"]):
+                        out.append((a, ("entities", en, "workflow", "transitions", tn, "by"),
+                                    f"transition `{tn}`", "by"))
+            for cn, c in (e.get("columns") or {}).items() if isinstance(e.get("columns"), dict) else []:
+                if isinstance(c, dict) and isinstance(c.get("default"), str):
+                    for a in _template_user_attrs(c["default"]):
+                        out.append((a, ("entities", en, "columns", cn, "default"), f"column `{cn}`", "default"))
+        return out
 
     def _check_measure(self, f: Field, report: Report):
         path = ("entities", f.entity, "measures", f.name)
@@ -511,6 +602,11 @@ class ModelIndex:
                         if node[0] == "name" and node[1] != "user":
                             report(path, label, f"{what} may only use `user` (it applies on every write "
                                                 f"path, where there are no dashboard filters); found `{node[1]}`")
+                            return
+                        if node[0] == "call" and (node[2] != "includes" or len(node[3]) != 1
+                                                  or node[1][0] != "member" or node[1][1] != ("name", "user")):
+                            report(path, label, f"{what}: use `user.<attribute>.includes(x)` with one argument, "
+                                                f"such as `user.roles.includes('sales_manager')`")
                             return
 
         for en, e in self.entities.items():
@@ -979,3 +1075,19 @@ def _walk(node):
             for c in child:
                 if isinstance(c, tuple):
                     yield from _walk(c)
+
+
+def _template_user_attrs(text: str) -> list[str]:
+    """`user.<attribute>` names in a `${...}` template; empty when it does not parse (reported elsewhere)."""
+    from .expr import ExprError, parse_template
+    try:
+        parts = parse_template(text)
+    except ExprError:
+        return []
+    out = []
+    for part in parts:
+        if isinstance(part, tuple):
+            for node in _walk(part):
+                if node[0] == "member" and node[1] == ("name", "user"):
+                    out.append(node[2])
+    return out

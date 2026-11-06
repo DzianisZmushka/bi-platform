@@ -26,6 +26,8 @@ from obi_formats.artifacts import parse
 from obi_formats.colexpr import ColExprError, parse as parse_colexpr, references
 from obi_formats.modelindex import FISCAL_GRAINS, MEASURE_KINDS, Field, ModelIndex, Ref, RefError
 
+from .access import Grants, NoAccess
+
 AGG_SQL = {"sum": "SUM({})", "count": "COUNT({})", "count_distinct": "COUNT(DISTINCT {})",
            "avg": "AVG({})", "min": "MIN({})", "max": "MAX({})"}
 DOUBLE_AGGS = ("sum", "avg")  # cast so integer columns do not come back as DECIMAL(38)
@@ -38,8 +40,9 @@ HANDLED_MODEL: dict[str, set[str]] = {
     "model": {"model", "title", "currency", "entities", "hierarchies"},
     "currency": {"target", "rates"},
     "rates": {"table", "currency", "month", "rate"},
-    "entity": {"table", "key", "grain", "currency", "writable", "per", "columns", "workflow", "joins", "rollups",
-               "dimensions", "measures"},
+    "entity": {"table", "key", "access", "grain", "currency", "writable", "per", "columns", "workflow", "joins",
+               "rollups", "dimensions", "measures"},
+    "row_access": {"where"},
     "column": {"label", "description", "type", "required", "default", "choices", "references", "check"},
     "workflow": {"column", "transitions"},
     "transition": {"from", "to", "by"},
@@ -144,8 +147,12 @@ STORE = "store"
 class Project:
     """A project directory: connection plus its models."""
 
-    def __init__(self, root: str | Path):
+    def __init__(self, root: str | Path, user: dict | None = None):
+        """`user`: who is asking (`obi serve`). Without one the engine runs as the system and
+        sees every row (`obi render`, `obi validate --execute`)."""
         self.root = Path(root)
+        self.user = user
+        self.grants = Grants.load(self.root, user) if user is not None else Grants.system()
         self.config = parse((self.root / "project.yaml").read_text(encoding="utf-8")).data
         self.currency = self.config.get("currency", "USD")
         self.connection = self.config["connections"][self.config["default_connection"]]
@@ -170,7 +177,7 @@ class Project:
             path = self.root / "model" / f"{model}.model.yaml"
             data = parse(path.read_text(encoding="utf-8")).data
             self._models[model] = Engine(self.con, ModelIndex(model, data),
-                                         store=STORE if self.database is not None else None)
+                                         store=STORE if self.database is not None else None, grants=self.grants)
         return self._models[model]
 
     def models(self) -> list[str]:
@@ -178,17 +185,173 @@ class Project:
 
 
 class Engine:
-    def __init__(self, con: duckdb.DuckDBPyConnection, idx: ModelIndex, store: str | None = None):
+    def __init__(self, con: duckdb.DuckDBPyConnection, idx: ModelIndex, store: str | None = None,
+                 grants: Grants | None = None):
         self.con, self.idx, self.store = con, idx, store
+        self.grants = grants or Grants.system()
+        self._n = 0
 
-    def table(self, entity: str) -> str:
+    def raw_table(self, entity: str) -> str:
         """SQL name of an entity's table: writable tables live in the project's database file."""
         name = _q(self.idx.entities[entity]["table"])
         return f"{self.store}.main.{name}" if self.store and self.idx.is_writable(entity) else name
 
+    def table(self, entity: str) -> str:
+        """The rows of an entity this user may see (ADR-013). Every read goes through here:
+        queries, joins, rollups, filter values, form loads and sheet rows."""
+        raw = self.raw_table(entity)
+        if self.grants.all_rows:
+            return raw
+        a = self._alias()
+        cond = self.row_condition(entity, a)
+        return raw if cond is None else f"(SELECT * FROM {raw} AS {a} WHERE {cond})"
+
+    # ------------------------------------------------------------------ row-level security
+
+    def _alias(self) -> str:
+        self._n += 1
+        return f"rls{self._n}"
+
+    def row_condition(self, entity: str, alias: str, _stack: tuple = ()) -> str | None:
+        """SQL condition on `alias` (a row of `entity`) that keeps the user's rows: the entity's
+        own `access:`, its `per` parent's rows, and the rows of every entity it joins that an
+        access rule covers. None when nothing limits the entity."""
+        if self.grants.all_rows or entity in _stack or not self.idx.covered(entity):
+            return None
+        e = self.idx.entities[entity]
+        stack = _stack + (entity,)
+        conds = []
+        if isinstance(e.get("access"), dict):
+            conds.append(self._access_condition(entity, alias))
+        parent = e.get("per")
+        if isinstance(parent, str) and self.idx.covered(parent):
+            keys = self.idx.key_columns(parent)
+            conds.append(self._in_rows([f"{alias}.{_q(k)}" for k in keys], parent, keys, stack))
+        for target, fk in self.idx.rls_targets(entity).items():
+            if not self.idx.covered(target):
+                continue
+            fks = fk if isinstance(fk, list) else [fk]
+            left = [_qualify(_checked_join(x, entity, target), alias) for x in fks]
+            conds.append(self._in_rows(left, target, self.idx.key_columns(target), stack))
+        return " AND ".join(f"({c})" for c in conds) or None
+
+    def _in_rows(self, left: list[str], target: str, keys: list[str], stack: tuple) -> str:
+        a = self._alias()
+        cond = self.row_condition(target, a, stack)
+        sub = f"SELECT {', '.join(f'{a}.{_q(k)}' for k in keys)} FROM {self.raw_table(target)} AS {a}"
+        if cond:
+            sub += f" WHERE {cond}"
+        lhs = left[0] if len(left) == 1 else "(" + ", ".join(left) + ")"
+        return f"{lhs} IN ({sub})"
+
+    def _access_condition(self, entity: str, alias: str) -> str:
+        """`access.where` with the user's attributes as literals. A missing attribute, or an
+        empty list, keeps no rows, never all rows."""
+        tree = parse_colexpr(self.idx.entities[entity]["access"]["where"]).copy()
+        user = self.grants.user or {}
+
+        class Missing(Exception):
+            pass
+
+        def values(name: str) -> list:
+            v = user.get(name)
+            return [x for x in v if x not in (None, "")] if isinstance(v, list) else \
+                ([] if v in (None, "") else [v])
+
+        def tx(node):
+            if isinstance(node, exp.In):
+                fld = node.args.get("field")
+                exprs = node.args.get("expressions") or []
+                ucol = fld if isinstance(fld, exp.Column) and fld.table == "user" else \
+                    (exprs[0] if len(exprs) == 1 and isinstance(exprs[0], exp.Column)
+                     and exprs[0].table == "user" else None)
+                if ucol is not None:
+                    vals = values(ucol.name)
+                    if not vals:
+                        return exp.false()
+                    left = node.this.copy().transform(tx)  # a replaced node's children are not revisited
+                    return exp.In(this=left, expressions=[exp.convert(v) for v in vals])
+            if isinstance(node, exp.Column) and node.table == "user":
+                vals = values(node.name)
+                if len(vals) != 1 or isinstance(user.get(node.name), list):
+                    raise Missing  # a scalar comparison needs exactly one value
+                return exp.convert(vals[0])
+            if isinstance(node, exp.Column):
+                f = self._resolve(f"{entity}.{node.name}", ("dimension",)).field
+                return exp.column(self._column(f), table=alias, quoted=True)
+            return node
+
+        try:
+            return tree.transform(tx).sql("duckdb")
+        except Missing:
+            return "FALSE"
+
+    def access_rules(self, entity: str, _stack: tuple = ()) -> list[tuple[str, str]]:
+        """(entity, condition) of every `access:` rule that limits this entity's rows."""
+        if entity in _stack or not self.idx.covered(entity):
+            return []
+        e = self.idx.entities[entity]
+        out = [(entity, e["access"]["where"])] if isinstance(e.get("access"), dict) else []
+        nxt = list(self.idx.rls_targets(entity)) + ([e["per"]] if isinstance(e.get("per"), str) else [])
+        for t in nxt:
+            out += [r for r in self.access_rules(t, _stack + (entity,)) if r not in out]
+        return out
+
+    # ------------------------------------------------------------------ read permissions
+
+    def check_read(self, q: "SemanticQuery"):
+        """Raise NoAccess when the query needs an entity or column the user may not read."""
+        if self.grants.is_system or not self.grants.configured:
+            return
+        fields: list[Field] = []
+        for d in list(q.dimensions) + [f.dimension for f in q.filters]:
+            fields.append(self._dim(d).field)
+        seen: set = set()
+
+        def measure(f: Field):
+            if f in seen:
+                return
+            seen.add(f)
+            fields.append(f)
+            for r in self.idx.calc_refs(f):
+                measure(self._resolve(r, ("measure",)).field)
+            for r in self.idx.where_refs(f):
+                fields.append(self._resolve(r, ("dimension",)).field)
+
+        for m in q.measures:
+            measure(self._resolve(m, ("measure",)).field)
+        for f in fields:
+            if not self.grants.can_read(f.entity):
+                raise NoAccess(f"you may not read `{f.entity}`")
+            for entity, column in self._columns_of(f):
+                if not self.grants.can_read_column(entity, column):
+                    raise NoAccess(f"`{entity}.{column}` is readable only by "
+                                   f"{', '.join(self.grants.column_readers(entity, column))}")
+
+    def _columns_of(self, f: Field) -> list[tuple[str, str]]:
+        if f.kind == "dimension":
+            lk = self.idx.lookup(f)
+            if lk:
+                return [(f.entity, n) for n, _ in references(parse_colexpr(lk[3]))]
+            return [(f.entity, self._column(f))]
+        kind = next((k for k in MEASURE_KINDS if k in f.spec), None)
+        if kind in (None, "calc") or not isinstance(f.spec.get(kind), str):
+            return []
+        out = []
+        rollups = self.idx.rollups(f.entity)
+        for name, _ in references(parse_colexpr(f.spec[kind])):
+            if name in rollups:
+                spec = rollups[name]
+                rk = self.idx.rollup_kind(spec)
+                out += [(spec["from"], n) for n, _ in references(parse_colexpr(spec[rk]))]
+            else:
+                out.append((f.entity, name))
+        return out
+
     # ------------------------------------------------------------------ public
 
     def query(self, q: SemanticQuery) -> pa.Table:
+        self.check_read(q)
         sql = self.sql(q)
         try:
             return self.con.sql(sql).to_arrow_table()
@@ -212,6 +375,7 @@ class Engine:
 
     def distinct(self, dimension: str, limit: int = 500) -> list:
         ref = self._dim(dimension)
+        self.check_read(SemanticQuery([], [dimension]))
         e = self.idx.entities[ref.field.entity]
         lk = self.idx.lookup(ref.field)
         if lk:

@@ -3,13 +3,16 @@
 A schema property must be one of:
 - handled: listed in the renderer's `RENDERED` (dashboard) or the engine's `HANDLED_*` (model, project);
 - documentation-only: listed in `DOCUMENTATION_ONLY` (no runtime behaviour by design);
-- marked `x-unsupported`: the validator then reports "not supported yet".
+- marked `x-unsupported`: the validator then reports "not supported yet";
+- marked `x-pending` (on the property, or on the whole schema): accepted and checked, but its
+  runtime is still being built; the validator warns "not enforced yet" wherever it is used.
 Nothing the validator accepts may be silently ignored.
 
 A property marked `x-write-rule` restricts writes. The server enforces it, and a test in
 `test_write_rules.py` posts around the page and is refused (`@refuses("<kind>:<def>.<prop>")`).
 """
 
+import json
 import re
 from datetime import date
 from importlib.resources import files
@@ -21,12 +24,24 @@ import pytest
 from obi_cli.forms import FORMS_RENDERED
 from obi_cli.render import RENDERED, render_dashboard
 from obi_engine import DOCUMENTATION_ONLY, HANDLED_MODEL, HANDLED_PROJECT
+from obi_engine.access import HANDLED_ACCESS
 from obi_formats.schema import get_schema
 from obi_formats.validate import validate_project
 
 DEMO = Path(os.environ["OBI_EXAMPLES"]) / "sales-demo"
 AS_OF = date(2026, 11, 5)
-REGISTRY = {"dashboard": RENDERED, "model": HANDLED_MODEL, "project": HANDLED_PROJECT, "form": FORMS_RENDERED}
+
+
+def shown(issue) -> bool:
+    """Errors and warnings, without info notices and without the "not enforced yet" warnings of
+    pending properties (ADR-013), which test_access.py checks on their own."""
+    return issue.severity != "info" and "is not enforced yet" not in issue.text
+REGISTRY = {"dashboard": RENDERED, "model": HANDLED_MODEL, "project": HANDLED_PROJECT, "form": FORMS_RENDERED,
+            "access": HANDLED_ACCESS}
+
+
+def pending(kind: str, sub: dict) -> bool:
+    return "x-pending" in sub or "x-pending" in get_schema(kind).raw
 
 
 def schema_properties(kind: str):
@@ -54,7 +69,7 @@ def cases():
 def test_every_schema_property_is_handled_or_marked(kind, owner, prop, sub):
     handled = prop in REGISTRY[kind].get(owner, set())
     documented = prop in DOCUMENTATION_ONLY.get(owner, set()) if kind == "model" else False
-    unsupported = "x-unsupported" in sub
+    unsupported = "x-unsupported" in sub or pending(kind, sub)
     assert handled or documented or unsupported, (
         f"{kind} schema `{owner}.{prop}` is accepted by the validator but nothing handles it. "
         f"Implement it and add it to the registry, or mark it `x-unsupported` in the schema.")
@@ -90,7 +105,7 @@ def test_unsupported_property_is_a_validator_error():
     prop = schema.defs["connection"]["properties"]["duckdb"]["properties"]["database"]
     prop["x-unsupported"] = "test reason"
     try:
-        msgs = [i.text for i in validate_project(DEMO) if i.severity != "info"]
+        msgs = [i.text for i in validate_project(DEMO) if shown(i)]
     finally:
         del prop["x-unsupported"]
     assert msgs == ["project `sales-demo`, connection `local`: `duckdb.database` is not supported yet: test reason"]
@@ -128,7 +143,7 @@ def test_pivot_table_respects_limit(tmp_path):
                       "                    values: [net_revenue]\n                    limit: 3\n                    totals: true\n")
     assert new.count("limit: 3") == 1
     f.write_text(new, encoding="utf-8")
-    assert [i for i in validate_project(dst) if i.severity != "info"] == []
+    assert [i for i in validate_project(dst) if shown(i)] == []
     html = render_dashboard(dst, "commercial-review", None, AS_OF).html
     table = re.search(r'id="w-segment_table">.*?<tbody>(.*?)</tbody>', html, re.S).group(1)
     assert table.count("<tr") == 3
@@ -144,7 +159,7 @@ def test_descriptions_are_rendered(tmp_path):
     new = new.replace("      - table: top_customers\n", "      - table: top_customers\n"
                       "        description: Ranked by net revenue.\n")
     f.write_text(new, encoding="utf-8")
-    assert [i for i in validate_project(dst) if i.severity != "info"] == []
+    assert [i for i in validate_project(dst) if shown(i)] == []
     html = render_dashboard(dst, "revenue-overview", None, AS_OF).html
     assert '<p class="desc">Page note.</p>' in html
     assert 'class="info" title="Ranked by net revenue."' in html
@@ -196,7 +211,7 @@ def test_every_write_rule_has_a_refusal_test():
     import ast
 
     rules = {f"{kind}:{owner}.{prop}" for kind in REGISTRY for owner, prop, sub in schema_properties(kind)
-             if sub.get("x-write-rule")}
+             if sub.get("x-write-rule") and not pending(kind, sub)}  # pending rules get theirs with the engine
     assert len(rules) >= 15, rules
     tree = ast.parse((Path(__file__).parent / "test_write_rules.py").read_text(encoding="utf-8"))
     proved = {arg.value for fn in ast.walk(tree) if isinstance(fn, ast.FunctionDef) and fn.name.startswith("test_")
@@ -204,3 +219,22 @@ def test_every_write_rule_has_a_refusal_test():
               for arg in d.args if isinstance(arg, ast.Constant)}
     assert sorted(rules - proved) == [], "write rules without a test that posts around the page and is refused"
     assert sorted(proved - rules) == [], "@refuses names a property that is not marked x-write-rule"
+
+
+def test_pending_property_warns_and_obi_serve_shows_a_banner():
+    """`x-pending`: accepted and checked, not enforced yet. Every use is a warning, and `obi serve`
+    shows a banner on every page while one is in use (ADR-013). No property is pending today."""
+    from obi_cli.server import pending_banner
+
+    assert not any("x-pending" in json.dumps(get_schema(k).raw) for k in REGISTRY)
+    schema = get_schema("model")
+    prop = schema.defs["entity"]["properties"]["access"]
+    prop["x-pending"] = "test reason"
+    try:
+        pending = [i.text for i in validate_project(DEMO) if "is not enforced yet" in i.text]
+    finally:
+        del prop["x-pending"]
+    assert pending == ["model `sales`, entity `regions`: `access` is not enforced yet: test reason"]
+    banner = pending_banner(pending)
+    assert "Access rules declared but not enforced." in banner and "test reason" in banner
+    assert pending_banner([]) == ""

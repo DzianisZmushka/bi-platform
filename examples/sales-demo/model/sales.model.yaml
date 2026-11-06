@@ -76,7 +76,7 @@ entities:
     columns:
       comment_id: { type: id }
       kpi: { type: string, required: true, choices: [revenue, attainment, margin, returns] }
-      region_id: { label: Region, type: string, references: region }
+      region_id: { label: Region, type: string, required: true, references: region }
       month: { type: date, required: true }
       comment: { type: text, required: true, check: length(comment) <= 500 }
     joins: { calendar: month, regions: region_id }
@@ -114,8 +114,10 @@ entities:
   regions:
     table: regions
     key: region_id
+    access: { where: region_code in user.regions }
     dimensions:
       region: { column: region_name }
+      region_code: { column: region_id }
 
 hierarchies:
   product: [category, subcategory, product_name]

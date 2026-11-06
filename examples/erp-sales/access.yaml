@@ -1,0 +1,32 @@
+access: erp-sales
+description: Who may see and write what. Users and their roles are never in Git (ADR-013).
+
+attributes:
+  sales_orgs:
+    type: list
+    description: Sales organisations (VKORG, such as DE01) the user works for, as in `sales_org_code`. Without it a user sees no rows.
+
+roles:
+  default:
+    description: Everyone who signs in, before their own roles. Restricting what someone sees is done with `deny`.
+    view: { dashboards: ["*"], forms: ["*"] }
+    read: ["*"]
+  viewer: { description: "Reads orders, notes and the shipment plan of their sales orgs." }
+  sales_rep:
+    description: Writes notes on the open items of their sales orgs.
+    edit: { forms: [order-note] }
+  sales_manager:
+    description: Approves notes and keeps the shipment plan for their sales orgs.
+    edit: { forms: ["*"] }
+  auditor:
+    description: Reads everything in their sales orgs and never writes, whatever other roles they hold.
+    deny:
+      edit: { forms: ["*"] }
+      write: ["*"]
+  admin:
+    description: Everything, every row.
+    edit: { forms: ["*"] }
+    rows: all
+
+columns:
+  order_items.WAVWR: { read: [sales_manager, admin] }
