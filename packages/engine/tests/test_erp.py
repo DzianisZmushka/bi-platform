@@ -174,3 +174,47 @@ def test_fiscal_year_compare_in_the_dashboard(erp):
     prev = eng.query(SemanticQuery(["order_value_usd"], [], [Filter("date", range=(date(2025, 4, 1), date(2025, 11, 5)))]))
     change = now.to_pylist()[0]["order_value_usd"] / prev.to_pylist()[0]["order_value_usd"] - 1
     assert kpi == f"{'▲' if change >= 0 else '▼'} {abs(change):.1%} vs previous year"
+
+
+SHIPPED = """
+    SELECT {group} SUM((COALESCE(l.q, 0) - COALESCE(b.q, 0)) * p.NETWR / p.KWMENG * fx.UKURS)
+    FROM vbap p JOIN vbak k ON p.VBELN = k.VBELN {join}
+    JOIN tcurr fx ON fx.FCURR = k.WAERK AND fx.GDATU = date_trunc('month', k.ERDAT)
+    LEFT JOIN (SELECT VGBEL, VGPOS, SUM(LFIMG) AS q FROM lips GROUP BY ALL) l ON l.VGBEL = p.VBELN AND l.VGPOS = p.POSNR
+    LEFT JOIN (SELECT AUBEL, AUPOS, SUM(FKIMG) AS q FROM vbrp GROUP BY ALL) b ON b.AUBEL = p.VBELN AND b.AUPOS = p.POSNR
+    WHERE p.ABGRU IS NULL {where} {group_by}"""
+
+
+def test_shipped_not_billed_uses_two_rollups(erp):
+    """The LLM's measure: (delivered - billed) x unit value, two rollups in one expression."""
+    project, eng = erp
+    got = {r["sales_org"]: r["shipped_not_billed_usd"]
+           for r in eng.query(SemanticQuery(["shipped_not_billed_usd"], ["sales_org"])).to_pylist()}
+    want = dict(oracle(project, SHIPPED.format(group="o.VTEXT,", join="JOIN tvko o ON k.VKORG = o.VKORG",
+                                               where="", group_by="GROUP BY 1")))
+    close(got, want)
+    assert all(v >= -0.01 for v in got.values()), "billing never exceeds delivery"
+
+
+def test_fully_billed_item_has_nothing_shipped_not_billed(erp):
+    project, eng = erp
+    doc, pos = oracle(project, """
+        SELECT p.VBELN, p.POSNR FROM vbap p
+        JOIN (SELECT VGBEL, VGPOS, SUM(LFIMG) d FROM lips GROUP BY ALL) l ON l.VGBEL = p.VBELN AND l.VGPOS = p.POSNR
+        JOIN (SELECT AUBEL, AUPOS, SUM(FKIMG) b FROM vbrp GROUP BY ALL) v ON v.AUBEL = p.VBELN AND v.AUPOS = p.POSNR
+        WHERE l.d = p.KWMENG AND v.b = p.KWMENG ORDER BY 1, 2 LIMIT 1""")[0]
+    row = eng.query(SemanticQuery(["shipped_not_billed_usd", "open_order_value_usd"], ["sales_order", "item"],
+                                  [Filter("sales_order", values=[doc]), Filter("item", values=[pos])])).to_pylist()[0]
+    assert row["shipped_not_billed_usd"] == 0 and row["open_order_value_usd"] == 0
+
+
+def test_measure_may_share_a_rollup_name(erp):
+    project, _ = erp
+    data = parse((ERP / "model/erp.model.yaml").read_text(encoding="utf-8")).data
+    measures = data["entities"]["deliveries"]["measures"]
+    measures["delivered_quantity"] = measures.pop("delivered_quantity_total")
+    eng = Engine(project.con, ModelIndex("erp", data))
+    row = eng.query(SemanticQuery(["delivered_quantity", "shipped_not_billed_usd"])).to_pylist()[0]
+    assert row["delivered_quantity"] == oracle(project, "SELECT SUM(LFIMG) FROM lips")[0][0]
+    assert row["shipped_not_billed_usd"] == pytest.approx(
+        oracle(project, SHIPPED.format(group="", join="", where="", group_by=""))[0][0])

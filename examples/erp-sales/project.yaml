@@ -10,6 +10,7 @@ connections:
     tables:
       vbak: data/vbak.csv
       vbap: data/vbap.csv
+      lips: data/lips.csv
       vbrp: data/vbrp.csv
       kna1: data/kna1.csv
       tvko: data/tvko.csv

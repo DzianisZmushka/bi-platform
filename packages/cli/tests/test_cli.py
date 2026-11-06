@@ -138,3 +138,19 @@ def test_erp_dashboard_renders(capsys):
                             drill={"product_margin": ["Pumps"]}).html
     assert '<div class="crumbs">' in html and "Centrifugal" in html
     assert "FY2026 P07" in html
+
+
+def test_serve_footer_names_project_and_commit(tmp_path):
+    """A stale server must be visible: the footer names the project, the start commit, and
+    warns when the repository has moved on."""
+    from obi_cli.server import git_commit, provenance
+
+    erp = DEMO.parent / "erp-sales"
+    commit = git_commit(erp)
+    assert commit and len(commit.split()[0]) >= 7
+    footer = provenance(erp, "2026-11-06 10:00", commit)
+    assert str(erp.resolve()) in footer and commit.split()[0] in footer and "older code" not in footer
+    stale = provenance(erp, "2026-11-05 21:52", "0000000")
+    assert "this server runs older code. Restart <code>obi serve</code>" in stale
+    html = render_dashboard(erp, "order-to-cash", None, AS_OF, mode="serve", footer=footer).html
+    assert 'class="provenance"' in html

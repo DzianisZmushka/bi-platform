@@ -20,6 +20,14 @@
       "WAVWR": "DOUBLE",
       "ABGRU": "VARCHAR"
     },
+    "lips": {
+      "VBELN": "VARCHAR",
+      "POSNR": "VARCHAR",
+      "VGBEL": "VARCHAR",
+      "VGPOS": "VARCHAR",
+      "LFIMG": "BIGINT",
+      "WADAT": "DATE"
+    },
     "vbrp": {
       "VBELN": "VARCHAR",
       "POSNR": "VARCHAR",

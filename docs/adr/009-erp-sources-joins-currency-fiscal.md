@@ -86,6 +86,8 @@ order_items:
       format: currency
 ```
 
+**Rollup names are local to their entity.** A rollup is only resolved inside its own entity's aggregation bodies (`calc:` resolves measures, `where:` dimensions). So rollups do not occupy the model-wide namespace of measures, dimensions and hierarchies. A measure elsewhere may share a rollup's name; a rollup may not share a column name of its own table. In the third LLM test the LLM named a measure `delivered_quantity_total` to avoid a clash the docs implied. Tests now pin that `delivered_quantity` is allowed for both, and the READMEs say so.
+
 The engine pre-aggregates the child per parent key, using the child's join columns, and joins that once. So there is no fan-out, and an item with no billing counts 0. A fully billed item has exactly 0 open value, whatever the exchange rate did in between, and a test pins this.
 
 ### 5. Lookup dimensions (format change)
@@ -121,6 +123,6 @@ date:
 
 ## Consequences
 
-- `erp.model.yaml` is 111 lines (101 non-blank), down from 123: 8 entities, 15 measures, 17 dimensions, 1 rollup and 3 hierarchies. Lookups saved 15 lines. Billing's own date, the rollup and the `date:`-routed measure added 4.
+- `erp.model.yaml` was 111 lines (101 non-blank), down from 123, before deliveries: lookups saved 15 lines, and billing's own date, the rollup and the `date:`-routed measure added 4. The third LLM test added deliveries (LIPS): a ninth entity, a second rollup and a shipped-not-billed measure, bringing it to 132 lines (121 non-blank) with 18 measures. That growth is new capability, not format overhead.
 - "Open orders" ignores the period filter on its dashboard page, because the open order book is not a period quantity.
 - Rollups, lookups and `date:` routes are small, targeted versions of what a full semantic layer offers (child aggregates, text joins, role-playing dimensions). If more of each is needed, that's evidence for the Cube re-evaluation (ADR-001).

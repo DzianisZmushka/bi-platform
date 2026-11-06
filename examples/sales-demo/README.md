@@ -23,7 +23,9 @@ The full formats are in the JSON Schemas in [packages/formats/src/obi_formats/sc
 
 **Joins.** When an entity reaches another by more than one route, the shortest route is used, and `obi validate` prints an info line saying which. Routes of the same length are an error.
 
-**Names.** Fields are referenced by bare name (`segment`). An entity prefix (`customers.segment`) is always allowed and is required only when the bare name is ambiguous. Date dimensions take a grain suffix: `date.month`, or `date.fiscal_period` / `date.fiscal_year` when the dimension has `fiscal:`.
+**Tables.** Every table an entity or lookup uses must be registered in `project.yaml` under the connection's `tables` (name → file). Then run `obi catalog` so validation knows its columns. A table that is not registered is a validation error.
+
+**Names.** Measures, dimensions and hierarchies share one model-wide namespace. Rollups do not: a rollup is only used inside its own entity's aggregations, so it may have the same name as a measure or dimension elsewhere. Fields are referenced by bare name (`segment`). An entity prefix (`customers.segment`) is always allowed and is required only when the bare name is ambiguous. Date dimensions take a grain suffix: `date.month`, or `date.fiscal_period` / `date.fiscal_year` when the dimension has `fiscal:`.
 
 **Grain.** This is the list of dimensions a measure can be sliced and filtered by. It defaults to everything reachable through joins. `targets` declares `grain: [date.month, region]`.
 

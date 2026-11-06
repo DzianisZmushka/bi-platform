@@ -8,13 +8,15 @@ SAP-style order-to-cash data:
 
 Regenerate the data with `uv run python examples/erp-sales/data/generate.py`.
 
+To add a source table (for example LIPS for deliveries): add the CSV under `data/`, register it in `project.yaml` under `tables`, and run `uv run obi catalog examples/erp-sales`.
+
 The model hides the technical column names. Its decisions are in [ADR-009](../../docs/adr/009-erp-sources-joins-currency-fiscal.md). The vocabulary is the same as [sales-demo](../sales-demo/README.md), plus:
 
 | Need | Format |
 |---|---|
 | billing item → order item on two columns | `joins: { order_items: [AUBEL, AUPOS] }` |
 | text table keyed by a code prefix | `product_line: { lookup: t179t.VTEXT, key: PRODH, match: "left(PRDHA, 5)" }` |
-| billed quantity per order item | `rollups: { billed_quantity: { sum: FKIMG, from: billing_items } }` |
+| billed or delivered quantity per order item | `rollups: { billed_quantity: { sum: FKIMG, from: billing_items } }`. Rollup names are local to their entity |
 | billing counted in the order's period | `date: order_date` on the measure |
 | amounts in document currency | model `currency: { target, rates }`, entity `currency: { code, date }` (each entity converts at its own date), measure `convert: USD` |
 | fiscal periods | `fiscal: { year, period }` on the date dimension; `date.fiscal_period`; presets such as `fiscal_year_to_date` |

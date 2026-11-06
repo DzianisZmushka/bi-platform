@@ -387,6 +387,9 @@ def test_route_notice_names_the_chosen_path_and_changes_with_a_new_join():
         return [i.text for i in validate_project(ERP, overrides or {}) if i.severity == "info"]
 
     assert infos() == [
+        "model `erp`, entity `deliveries`: reaches `calendar` by 2 routes; using the shortest, deliveries → "
+        "calendar (not deliveries → order_items → orders → calendar). A measure can choose another date route "
+        "with `date:`",
         "model `erp`, entity `billing_items`: reaches `calendar` by 2 routes; using the shortest, billing_items → "
         "calendar (not billing_items → order_items → orders → calendar). A measure can choose another date route "
         "with `date:`",
@@ -414,3 +417,10 @@ def test_fiscal_presets_and_grains_need_a_fiscal_calendar():
         "dashboard `revenue-overview`, widget `revenue_trend`: `date.fiscal_period`: dimension `date` has no "
         "fiscal calendar; add `fiscal: { year: <column>, period: <column> }` to it",
     ]
+
+
+def test_rollup_names_are_local_to_their_entity():
+    """ADR-009: a rollup is only referenced inside its own entity's aggregations, so a measure
+    elsewhere may use the same name. The LLM avoided `delivered_quantity` because the README did
+    not say this; it is valid."""
+    assert erp_messages(ERP_MODEL, "      delivered_quantity_total: {", "      delivered_quantity: {") == []

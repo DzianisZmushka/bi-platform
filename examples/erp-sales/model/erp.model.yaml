@@ -1,6 +1,6 @@
 model: erp
 title: Order to cash
-description: SAP SD sales orders (VBAK/VBAP) and billing (VBRP) with their master data, reported in USD.
+description: SAP SD sales orders (VBAK/VBAP), deliveries (LIPS) and billing (VBRP) with their master data, reported in USD.
 
 currency:
   target: USD
@@ -15,6 +15,7 @@ entities:
     joins: { orders: VBELN, materials: MATNR }
     rollups:
       billed_quantity: { sum: FKIMG, from: billing_items }
+      delivered_quantity: { sum: LFIMG, from: deliveries }
     dimensions:
       item: { column: POSNR }
       rejection_reason: { column: ABGRU }
@@ -34,6 +35,12 @@ entities:
         where: rejection_reason is null
         convert: USD
         format: currency
+      shipped_not_billed_usd:
+        sum: (delivered_quantity - billed_quantity) * NETWR / KWMENG
+        label: Shipped, not billed
+        where: rejection_reason is null
+        convert: USD
+        format: currency
       return_value_usd: { sum: NETWR, where: order_type = 'ZRE', convert: USD, format: currency }
       order_count: { count_distinct: VBELN, format: integer }
       item_count: { count: POSNR, format: integer }
@@ -49,6 +56,20 @@ entities:
       order_date: { column: ERDAT, type: date }
       order_type: { column: AUART }
       document_currency: { column: WAERK }
+
+  deliveries:
+    description: Delivery items (LIPS), linked to the order item they ship; dated at goods issue.
+    table: lips
+    key: [VBELN, POSNR]
+    joins:
+      calendar: WADAT
+      order_items: [VGBEL, VGPOS]
+    dimensions:
+      delivery: { column: VBELN }
+      goods_issue_date: { column: WADAT, type: date }
+    measures:
+      delivered_quantity_total: { sum: LFIMG, label: Delivered quantity, format: integer }
+      delivery_count: { count_distinct: VBELN, format: integer }
 
   billing_items:
     description: Billing items (VBRP), linked to the order item they bill; dated and converted at billing.

@@ -663,7 +663,7 @@ class ModelIndex:
             if table not in catalog:
                 report(("entities", en, "table"), f"entity `{en}`",
                        f"table `{table}` not found in connection `{connection}`"
-                       + did_you_mean(table, catalog) + " If it is new, add it under `tables` in project.yaml.")
+                       + (did_you_mean(table, catalog) or ".") + " If it is new, add it under `tables` in project.yaml.")
                 continue
             cols = catalog[table]
             if cols is None:

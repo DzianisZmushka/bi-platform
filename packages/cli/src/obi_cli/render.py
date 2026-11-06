@@ -183,7 +183,7 @@ class _Page:
 
 def render_dashboard(root: str | Path, dash_id: str, inputs: dict[str, list[str]] | None = None,
                      as_of: date | None = None, mode: str = "static",
-                     drill: dict[str, list[str]] | None = None) -> RenderResult:
+                     drill: dict[str, list[str]] | None = None, footer: str = "") -> RenderResult:
     root = Path(root)
     project = Project(root)
     dashboards = {}
@@ -200,7 +200,7 @@ def render_dashboard(root: str | Path, dash_id: str, inputs: dict[str, list[str]
         desc = f'<p class="desc">{esc(p["description"])}</p>' if p.get("description") else ""
         body.append(f'<section class="page" id="{esc(p["page"])}" data-title="{esc(_title_of(p))}">'
                     f'{desc}{items}</section>')
-    html_text = _document(page, "".join(body))
+    html_text = _document(page, "".join(body), footer)
     return RenderResult(html_text, page.errors)
 
 
@@ -741,7 +741,7 @@ def _filter_bar(page: _Page) -> str:
             f'<button type="submit">Apply</button><a href="/{esc(page.dash_id)}">Reset</a></form>')
 
 
-def _document(page: _Page, body: str) -> str:
+def _document(page: _Page, body: str, footer: str = "") -> str:
     d = page.dash
     tabs = "".join(f'<a href="#{esc(p["page"])}" data-page="{esc(p["page"])}">{esc(_title_of(p))}</a>'
                    for p in d["pages"])
@@ -768,7 +768,7 @@ def _document(page: _Page, body: str) -> str:
 {_filter_bar(page)}
 <nav class="pages">{tabs}</nav>
 {errors}<main>{body}</main>
-<footer>{mode_note}</footer>
+<footer>{mode_note}{footer}</footer>
 <script id="charts" type="application/json">{charts}</script>
 <script>{js}</script>
 </body></html>

@@ -17,7 +17,12 @@ Tables (SAP-ish names on purpose):
   calendar                             DATUM, FISCAL_YEAR, FISCAL_PERIOD, PERIOD_START
   vbak   sales order headers           VBELN, ERDAT, AUDAT, VKORG, KUNNR, WAERK, AUART, VKBUR
   vbap   sales order items             VBELN, POSNR, MATNR, KWMENG, NETWR, WAVWR, ABGRU
+  lips   delivery items                VBELN (delivery doc), POSNR, VGBEL, VGPOS, LFIMG, WADAT
   vbrp   billing items                 VBELN (billing doc), POSNR, AUBEL, AUPOS, FKDAT, FKIMG, NETWR
+
+Document flow: order item -> delivery (goods issue) -> billing. Deliveries and billing are drawn
+from a second random generator after the orders, so adding them left every other table
+byte-identical to the version without deliveries.
 """
 
 from __future__ import annotations
@@ -178,7 +183,7 @@ def gen_master() -> tuple[list, list, list, list, dict]:
     return t001, tvko, t179t, mara, {"mat": mat_meta, "cust": cust_meta, "kna1": kna1}
 
 
-def gen_transactions(meta: dict, rate_rows: list[list]) -> tuple[list, list, list]:
+def gen_transactions(meta: dict, rate_rows: list[list]) -> tuple[list, list, list, list]:
     mat_meta = meta["mat"]
     cust_by_org: dict[str, list[str]] = {}
     for k, (vkorg, _) in meta["cust"].items():
@@ -191,7 +196,8 @@ def gen_transactions(meta: dict, rate_rows: list[list]) -> tuple[list, list, lis
 
     vbak: list[list] = []
     vbap: list[list] = []
-    vbrp: list[list] = []
+    legacy_billing: list[list] = []  # the pre-delivery billing draws, kept so `rng` stays in step
+    items: list[tuple] = []          # (doc, posnr, order date, AUART, ABGRU, quantity, NETWR)
     vbeln = 1000000
     billing_no = 9000000
 
@@ -237,8 +243,10 @@ def gen_transactions(meta: dict, rate_rows: list[list]) -> tuple[list, list, lis
                 wavwr = round(cost_doc * qty * (1 if auart != "ZRE" else -1), 2)
                 abgru = rng.choice(reject_reasons)
                 vbap.append([doc, posnr, matnr, qty, netwr, wavwr, abgru])
+                items.append((doc, posnr, d, auart, abgru, qty, netwr))
 
-                # billing: most non-rejected items are billed 2-25 days later
+                # Former billing draws: still consumed from `rng` so vbak and vbap stay identical,
+                # but their result is discarded. Billing now follows delivery (gen_document_flow).
                 if not abgru and auart != "ZFD" and rng.random() < 0.93:
                     fkdat = d + timedelta(days=rng.randint(2, 25))
                     if fkdat <= END:
@@ -249,9 +257,50 @@ def gen_transactions(meta: dict, rate_rows: list[list]) -> tuple[list, list, lis
                         if qty > 1 and rng.random() < 0.08:
                             fkimg = rng.randint(1, qty - 1)
                         bill_netwr = round(netwr * fkimg / qty, 2)
-                        vbrp.append([bill_doc, "000010", doc, posnr, fkdat.isoformat(), fkimg, bill_netwr])
+                        legacy_billing.append([bill_doc, "000010", doc, posnr, fkdat.isoformat(), fkimg, bill_netwr])
 
-    return vbak, vbap, vbrp
+    lips, vbrp = gen_document_flow(items)
+    return vbak, vbap, lips, vbrp
+
+
+def gen_document_flow(items: list[tuple]) -> tuple[list, list]:
+    """Deliveries, then billing of what was delivered.
+
+    - Only non-rejected items of standard orders (OR) ship.
+    - About 90% ship in one delivery 1-10 days after the order; about 10% (quantity > 1) in two
+      partial deliveries, the second 3-20 days after the first.
+    - Each delivery is billed 1-15 days after goods issue with probability 0.95; about 8% of
+      multi-unit deliveries are billed partially. Billing never exceeds the delivered quantity.
+    - Nothing is dated after END: later deliveries and bills have not happened yet.
+    """
+    flow = random.Random(SEED + 1)
+    lips: list[list] = []
+    vbrp: list[list] = []
+    delivery_no, billing_no = 80000000, 9000000
+    for doc, posnr, ordered, auart, abgru, qty, netwr in items:
+        if auart != "OR" or abgru:
+            continue
+        first = ordered + timedelta(days=flow.randint(1, 10))
+        if qty > 1 and flow.random() < 0.10:
+            part = flow.randint(1, qty - 1)
+            shipments = [(first, part), (first + timedelta(days=flow.randint(3, 20)), qty - part)]
+        else:
+            shipments = [(first, qty)]
+        for wadat, lfimg in shipments:
+            if wadat > END:
+                continue
+            delivery_no += 1
+            lips.append([f"{delivery_no:010d}", "000010", doc, posnr, lfimg, wadat.isoformat()])
+            if flow.random() >= 0.95:
+                continue
+            fkdat = wadat + timedelta(days=flow.randint(1, 15))
+            if fkdat > END:
+                continue
+            fkimg = flow.randint(1, lfimg - 1) if lfimg > 1 and flow.random() < 0.08 else lfimg
+            billing_no += 1
+            vbrp.append([f"{billing_no:010d}", "000010", doc, posnr, fkdat.isoformat(), fkimg,
+                         round(netwr * fkimg / qty, 2)])
+    return lips, vbrp
 
 
 def gen_calendar() -> list[list]:
@@ -266,7 +315,7 @@ def gen_calendar() -> list[list]:
 def main() -> None:
     t001, tvko, t179t, mara, meta = gen_master()
     tcurr = rates()
-    vbak, vbap, vbrp = gen_transactions(meta, tcurr)
+    vbak, vbap, lips, vbrp = gen_transactions(meta, tcurr)
 
     write("t001", ["BUKRS", "BUTXT", "WAERS"], t001)
     write("tvko", ["VKORG", "VTEXT", "BUKRS"], tvko)
@@ -277,6 +326,7 @@ def main() -> None:
     write("calendar", ["DATUM", "FISCAL_YEAR", "FISCAL_PERIOD", "PERIOD_START"], gen_calendar())
     write("vbak", ["VBELN", "ERDAT", "AUDAT", "VKORG", "KUNNR", "WAERK", "AUART", "VKBUR"], vbak)
     write("vbap", ["VBELN", "POSNR", "MATNR", "KWMENG", "NETWR", "WAVWR", "ABGRU"], vbap)
+    write("lips", ["VBELN", "POSNR", "VGBEL", "VGPOS", "LFIMG", "WADAT"], lips)
     write("vbrp", ["VBELN", "POSNR", "AUBEL", "AUPOS", "FKDAT", "FKIMG", "NETWR"], vbrp)
 
 
